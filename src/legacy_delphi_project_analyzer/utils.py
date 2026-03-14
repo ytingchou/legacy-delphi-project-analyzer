@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,39 @@ def split_text_chunks(content: str, max_chars: int) -> list[str]:
             current_len = 0
         current.append(line)
         current_len += len(line)
+    if current:
+        chunks.append("".join(current))
+    return chunks
+
+
+def estimate_tokens(content: str) -> int:
+    if not content:
+        return 0
+    # Fast heuristic for GPT/Qwen-class tokenization across mixed code and prose.
+    return max(1, math.ceil(len(content) / 4))
+
+
+def split_text_chunks_by_budget(
+    content: str,
+    max_chars: int,
+    max_tokens: int,
+) -> list[str]:
+    if len(content) <= max_chars and estimate_tokens(content) <= max_tokens:
+        return [content]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_chars = 0
+    current_tokens = 0
+    for line in content.splitlines(keepends=True):
+        line_tokens = estimate_tokens(line)
+        if current and (current_chars + len(line) > max_chars or current_tokens + line_tokens > max_tokens):
+            chunks.append("".join(current))
+            current = []
+            current_chars = 0
+            current_tokens = 0
+        current.append(line)
+        current_chars += len(line)
+        current_tokens += line_tokens
     if current:
         chunks.append("".join(current))
     return chunks

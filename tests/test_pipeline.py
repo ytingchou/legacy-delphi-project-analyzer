@@ -24,14 +24,28 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "llm-pack" / "project-summary.md").exists())
             self.assertTrue((output_root / "llm-pack" / "modules" / "orderentry.md").exists())
             self.assertTrue((output_root / "llm-pack" / "queries" / "orderlookup.md").exists())
+            self.assertTrue((output_root / "llm-pack" / "flows" / "orderentry-flow.md").exists())
+            self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentry.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "load-plan.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "boss-summary.md").exists())
             self.assertTrue((output_root / "errors" / "prompt-recipes.md").exists())
             self.assertTrue((output_root / "knowledge" / "learned_patterns.json").exists())
+            self.assertTrue((output_root / "report" / "index.html").exists())
             self.assertGreaterEqual(len(output.transition_mapping.modules), 1)
+            self.assertGreaterEqual(len(output.business_flows), 1)
             self.assertGreaterEqual(len(output.manifest), 5)
+            self.assertIsNotNone(output.complexity_report)
+            self.assertTrue(any(entry.estimated_tokens > 0 for entry in output.manifest))
             module_text = (output_root / "llm-pack" / "modules" / "orderentry.md").read_text(
                 encoding="utf-8"
             )
             self.assertIn("OrderLookup", module_text)
+            flow_text = (output_root / "llm-pack" / "flows" / "orderentry-flow.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("btnSearchClick", flow_text)
+            report_text = (output_root / "report" / "index.html").read_text(encoding="utf-8")
+            self.assertIn("Complexity Dashboard", report_text)
 
     def test_pipeline_handles_binary_dfm_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

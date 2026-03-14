@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from legacy_delphi_project_analyzer.models import DiagnosticRecord, PascalClassSummary, PascalUnitSummary
+from legacy_delphi_project_analyzer.models import (
+    DiagnosticRecord,
+    PascalClassSummary,
+    PascalMethodFlow,
+    PascalUnitSummary,
+)
 from legacy_delphi_project_analyzer.utils import (
     PLACEHOLDER_RE,
     make_diagnostic,
@@ -30,6 +35,7 @@ FIELD_RE = re.compile(r"^\s*([A-Za-z0-9_,\s]+)\s*:\s*([A-Za-z0-9_.<>]+)\s*;\s*$"
 PROPERTY_RE = re.compile(r"^\s*property\s+([A-Za-z0-9_]+)\b", re.IGNORECASE)
 SECTION_RE = re.compile(r"^\s*(private|protected|public|published|automated)\b", re.IGNORECASE)
 EVENT_NAME_HINT_RE = re.compile(r"(click|change|exit|enter|close|open|keydown|keyup|create|show)$", re.I)
+CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_.]*)\s*\(")
 
 
 def analyze_pascal_file(path: Path) -> tuple[PascalUnitSummary, list[DiagnosticRecord]]:
@@ -102,6 +108,7 @@ def analyze_pascal_file(path: Path) -> tuple[PascalUnitSummary, list[DiagnosticR
     load_sql_calls = list(LOAD_SQL_RE.finditer(text))
     referenced_query_names = sorted({match.group(2) for match in load_sql_calls})
     xml_references.extend(match.group(1) for match in load_sql_calls)
+    method_flows = _extract_method_flows(text)
 
     return (
         PascalUnitSummary(
@@ -120,6 +127,7 @@ def analyze_pascal_file(path: Path) -> tuple[PascalUnitSummary, list[DiagnosticR
             xml_references=sorted(set(item.lower() for item in xml_references)),
             replace_tokens=replace_tokens,
             referenced_query_names=referenced_query_names,
+            method_flows=method_flows,
         ),
         diagnostics,
     )
@@ -224,6 +232,82 @@ def _strip_pascal_comments(text: str) -> str:
                 state = "default"
         index += 1
     return "".join(result)
+
+
+def _extract_method_flows(text: str) -> list[PascalMethodFlow]:
+    structural = _strip_pascal_comments(text)
+    implementation_index = structural.lower().find("implementation")
+    if implementation_index >= 0:
+        text = text[implementation_index:]
+        structural = structural[implementation_index:]
+    methods: list[PascalMethodFlow] = []
+    headers = list(METHOD_RE.finditer(structural))
+    for index, match in enumerate(headers):
+        method_name = match.group(1)
+        start = match.start()
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        block = text[start:end]
+        block_without_comments = _strip_pascal_comments(block)
+        load_sql_calls = list(LOAD_SQL_RE.finditer(block))
+        string_literals = [_unquote(item.group(0)) for item in STRING_RE.finditer(block)]
+        sql_snippets = [
+            trim_sql_snippet(literal.strip())
+            for literal in string_literals
+            if re.search(r"\b(select|insert|update|delete|merge|from|where)\b", literal, re.I)
+        ]
+        replace_tokens = sorted(
+            {item.group(1) for item in PLACEHOLDER_RE.finditer(block) if item.group(1)}
+        )
+        xml_refs = sorted({item.group(1).lower() for item in load_sql_calls} | set(
+            literal.lower() for literal in XML_LITERAL_RE.findall(block)
+        ))
+        query_names = sorted({item.group(2) for item in load_sql_calls})
+        call_names = _extract_method_calls(block_without_comments)
+        methods.append(
+            PascalMethodFlow(
+                method_name=method_name,
+                query_names=query_names,
+                xml_references=xml_refs,
+                replace_tokens=replace_tokens,
+                called_methods=call_names,
+                sql_snippets=sorted(set(sql_snippets)),
+            )
+        )
+    return methods
+
+
+def _extract_method_calls(block: str) -> list[str]:
+    calls = []
+    ignored = {
+        "LoadSql",
+        "GetSql",
+        "StringReplace",
+        "Create",
+        "Free",
+        "WriteLn",
+        "Inc",
+        "Dec",
+        "SetLength",
+        "Length",
+        "High",
+        "Low",
+        "Assigned",
+    }
+    for match in CALL_RE.finditer(block):
+        name = match.group(1)
+        simple = name.split(".")[-1]
+        if simple in ignored:
+            continue
+        if simple.lower() in {"if", "for", "while", "case"}:
+            continue
+        calls.append(name)
+    deduped = []
+    seen = set()
+    for name in calls:
+        if name not in seen:
+            seen.add(name)
+            deduped.append(name)
+    return deduped
 
 
 def _unquote(value: str) -> str:

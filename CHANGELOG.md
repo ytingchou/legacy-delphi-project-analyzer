@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.0
+
+- Added business-flow extraction from DFM event bindings to Pascal method heuristics.
+- Added token-aware artifact chunking, load bundles, and a project-level load plan.
+- Added boss-facing executive summaries, complexity scoring, and a static web dashboard.
+- Added a `serve-report` CLI command for local report preview.
+
 ## v0.2.0
 
 - Added heuristic binary DFM parsing with diagnostics and prompt hints.

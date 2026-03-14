@@ -5,9 +5,14 @@ from pathlib import Path
 from legacy_delphi_project_analyzer.analyzers.dfm import analyze_dfm_file
 from legacy_delphi_project_analyzer.analyzers.pascal import analyze_pascal_file
 from legacy_delphi_project_analyzer.analyzers.sql_xml import SqlXmlResolver, parse_sql_xml_file
-from legacy_delphi_project_analyzer.artifacts import build_transition_mapping, package_analysis
+from legacy_delphi_project_analyzer.artifacts import (
+    build_business_flows,
+    build_transition_mapping,
+    package_analysis,
+)
 from legacy_delphi_project_analyzer.knowledge import KnowledgeStore
 from legacy_delphi_project_analyzer.models import AnalysisOutput, ProjectInventory
+from legacy_delphi_project_analyzer.reporting import build_complexity_report
 from legacy_delphi_project_analyzer.utils import make_diagnostic
 
 
@@ -20,6 +25,7 @@ def run_analysis(
     rules_dir: Path | None = None,
     phases: list[str] | None = None,
     max_artifact_chars: int = 40000,
+    max_artifact_tokens: int = 10000,
 ) -> AnalysisOutput:
     project_root = project_root.resolve()
     output_dir = output_dir.resolve()
@@ -104,9 +110,20 @@ def run_analysis(
             output.diagnostics,
             knowledge.apply_module_override,
         )
+        output.business_flows = build_business_flows(
+            output.pascal_units,
+            output.forms,
+            output.transition_mapping,
+            output.resolved_queries,
+        )
+        output.complexity_report = build_complexity_report(output)
 
     if "package" in phases:
-        output.manifest = package_analysis(output, max_artifact_chars=max_artifact_chars)
+        output.manifest, output.load_bundles = package_analysis(
+            output,
+            max_artifact_chars=max_artifact_chars,
+            max_artifact_tokens=max_artifact_tokens,
+        )
 
     if "learn" in phases:
         knowledge.learn(output.diagnostics, output.resolved_queries)

@@ -6,14 +6,29 @@ from pathlib import Path
 from legacy_delphi_project_analyzer.models import (
     AnalysisOutput,
     ArtifactManifestEntry,
+    BusinessFlowArtifact,
+    BusinessFlowStep,
     BusinessModuleArtifact,
     DiagnosticRecord,
     FormSummary,
+    LoadBundleArtifact,
+    PascalMethodFlow,
     PascalUnitSummary,
     ResolvedQueryArtifact,
     TransitionMappingArtifact,
 )
-from legacy_delphi_project_analyzer.utils import ensure_directory, slugify, split_text_chunks, write_json, write_text
+from legacy_delphi_project_analyzer.reporting import (
+    build_boss_summary_markdown,
+    build_web_report_html,
+)
+from legacy_delphi_project_analyzer.utils import (
+    ensure_directory,
+    estimate_tokens,
+    slugify,
+    split_text_chunks_by_budget,
+    write_json,
+    write_text,
+)
 
 
 def build_transition_mapping(
@@ -115,10 +130,115 @@ def build_transition_mapping(
     )
 
 
+def build_business_flows(
+    pascal_units: list[PascalUnitSummary],
+    forms: list[FormSummary],
+    transition_mapping: TransitionMappingArtifact,
+    resolved_queries: list[ResolvedQueryArtifact],
+) -> list[BusinessFlowArtifact]:
+    units_by_name = {item.unit_name.lower(): item for item in pascal_units}
+    forms_by_name = {item.root_name: item for item in forms if item.root_name}
+    queries_by_name = {item.name.lower(): item for item in resolved_queries}
+    flows: list[BusinessFlowArtifact] = []
+
+    for module in transition_mapping.modules:
+        unit_summaries = [
+            units_by_name[unit_name.lower()]
+            for unit_name in module.source_units
+            if unit_name and unit_name.lower() in units_by_name
+        ]
+        module_forms = [
+            forms_by_name[form_name]
+            for form_name in module.forms
+            if form_name and form_name in forms_by_name
+        ]
+        method_index: dict[str, PascalMethodFlow] = {}
+        for unit in unit_summaries:
+            for method_flow in unit.method_flows:
+                simple_name = method_flow.method_name.split(".")[-1]
+                method_index[simple_name.lower()] = method_flow
+                method_index[method_flow.method_name.lower()] = method_flow
+
+        steps: list[BusinessFlowStep] = []
+        for form in module_forms:
+            for trigger, handler in sorted(form.event_bindings.items()):
+                method_flow = method_index.get(handler.lower())
+                if method_flow:
+                    steps.append(
+                        BusinessFlowStep(
+                            trigger=trigger,
+                            handler=handler,
+                            queries=method_flow.query_names,
+                            xml_references=method_flow.xml_references,
+                            replace_tokens=method_flow.replace_tokens,
+                            called_methods=method_flow.called_methods,
+                            sql_snippets=method_flow.sql_snippets,
+                            notes=["Linked from DFM event binding."],
+                        )
+                    )
+                else:
+                    steps.append(
+                        BusinessFlowStep(
+                            trigger=trigger,
+                            handler=handler,
+                            notes=["Event handler was declared in DFM but no implementation body was recovered."],
+                        )
+                    )
+
+        if not steps:
+            for unit in unit_summaries:
+                for method_flow in unit.method_flows:
+                    if not (
+                        method_flow.query_names
+                        or method_flow.replace_tokens
+                        or method_flow.xml_references
+                        or method_flow.sql_snippets
+                    ):
+                        continue
+                    steps.append(
+                        BusinessFlowStep(
+                            trigger="pascal-method",
+                            handler=method_flow.method_name,
+                            queries=method_flow.query_names,
+                            xml_references=method_flow.xml_references,
+                            replace_tokens=method_flow.replace_tokens,
+                            called_methods=method_flow.called_methods,
+                            sql_snippets=method_flow.sql_snippets,
+                            notes=["Recovered from Pascal method heuristics without a DFM event source."],
+                        )
+                    )
+
+        linked_queries = {query for step in steps for query in step.queries}
+        unresolved_queries = [
+            query_name
+            for query_name in module.query_artifacts
+            if query_name.lower() not in {item.lower() for item in linked_queries}
+        ]
+        recommendations = []
+        for query_name in module.query_artifacts:
+            query = queries_by_name.get(query_name.lower())
+            if query and query.unresolved_placeholders:
+                recommendations.append(
+                    f"Clarify Delphi-side replacement for query {query.name}: {', '.join(query.unresolved_placeholders)}"
+                )
+        if not recommendations and steps:
+            recommendations.append("Use the flow artifact first, then load only the linked query artifacts.")
+        flows.append(
+            BusinessFlowArtifact(
+                module_name=module.name,
+                steps=steps,
+                unlinked_queries=unresolved_queries,
+                recommendations=recommendations,
+            )
+        )
+    return flows
+
+
 def package_analysis(
     output: AnalysisOutput,
     max_artifact_chars: int,
-) -> list[ArtifactManifestEntry]:
+    max_artifact_tokens: int,
+) -> tuple[list[ArtifactManifestEntry], list[LoadBundleArtifact]]:
     if not output.output_dir:
         raise ValueError("output.output_dir must be set before packaging analysis artifacts.")
 
@@ -127,11 +247,13 @@ def package_analysis(
     intermediate_dir = output_root / "intermediate"
     llm_pack_dir = output_root / "llm-pack"
     errors_dir = output_root / "errors"
+    report_dir = output_root / "report"
 
-    for directory in (inventory_dir, intermediate_dir, llm_pack_dir, errors_dir):
+    for directory in (inventory_dir, intermediate_dir, llm_pack_dir, errors_dir, report_dir):
         ensure_directory(directory)
 
     manifest: list[ArtifactManifestEntry] = []
+    query_to_modules = _query_to_modules(output.transition_mapping)
 
     inventory_payload = {
         "inventory": output.inventory,
@@ -140,6 +262,7 @@ def package_analysis(
             "forms": len(output.forms),
             "sql_xml_files": len(output.sql_xml_files),
             "resolved_queries": len(output.resolved_queries),
+            "business_flows": len(output.business_flows),
             "diagnostics": len(output.diagnostics),
         },
     }
@@ -149,6 +272,7 @@ def package_analysis(
             kind="inventory",
             path=(inventory_dir / "project_inventory.json").as_posix(),
             chars=len(str(inventory_payload)),
+            estimated_tokens=estimate_tokens(str(inventory_payload)),
             tags=["inventory", "summary"],
             recommended_for=["project-scan"],
         )
@@ -159,6 +283,9 @@ def package_analysis(
     write_json(intermediate_dir / "sql_xml_files.json", output.sql_xml_files)
     write_json(intermediate_dir / "resolved_queries.json", output.resolved_queries)
     write_json(intermediate_dir / "transition_mapping.json", output.transition_mapping)
+    write_json(intermediate_dir / "business_flows.json", output.business_flows)
+    if output.complexity_report is not None:
+        write_json(intermediate_dir / "complexity_report.json", output.complexity_report)
 
     manifest.extend(
         [
@@ -171,8 +298,21 @@ def package_analysis(
                 intermediate_dir / "transition_mapping.json",
                 ["transition", "mapping"],
             ),
+            _manifest_entry(
+                "business-flows",
+                intermediate_dir / "business_flows.json",
+                ["flow", "transition"],
+            ),
         ]
     )
+    if output.complexity_report is not None:
+        manifest.append(
+            _manifest_entry(
+                "complexity-report",
+                intermediate_dir / "complexity_report.json",
+                ["leadership", "complexity"],
+            )
+        )
 
     project_summary = _build_project_summary(output)
     manifest.extend(
@@ -180,6 +320,7 @@ def package_analysis(
             llm_pack_dir / "project-summary.md",
             project_summary,
             max_artifact_chars,
+            max_artifact_tokens,
             kind="llm-summary",
             tags=["summary", "llm"],
             recommended_for=["project-overview"],
@@ -192,6 +333,7 @@ def package_analysis(
             errors_dir / "prompt-recipes.md",
             prompt_recipes,
             max_artifact_chars,
+            max_artifact_tokens,
             kind="prompt-recipes",
             tags=["prompts", "diagnostics"],
             recommended_for=["debugging", "llm-follow-up"],
@@ -204,6 +346,7 @@ def package_analysis(
             errors_dir / "diagnostics.md",
             diagnostics_md,
             max_artifact_chars,
+            max_artifact_tokens,
             kind="diagnostics",
             tags=["diagnostics"],
             recommended_for=["debugging"],
@@ -214,27 +357,69 @@ def package_analysis(
         _manifest_entry("diagnostics-json", errors_dir / "diagnostics.json", ["diagnostics"])
     )
 
+    if output.complexity_report is not None:
+        boss_summary = build_boss_summary_markdown(output)
+        manifest.extend(
+            _write_chunked_markdown(
+                llm_pack_dir / "boss-summary.md",
+                boss_summary,
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="boss-summary",
+                tags=["leadership", "summary"],
+                recommended_for=["leadership"],
+            )
+        )
+        write_json(report_dir / "complexity-report.json", output.complexity_report)
+        manifest.append(
+            _manifest_entry(
+                "report-data",
+                report_dir / "complexity-report.json",
+                ["leadership", "report"],
+            )
+        )
+        write_text(report_dir / "index.html", build_web_report_html(output))
+        manifest.append(
+            _manifest_entry("web-report", report_dir / "index.html", ["leadership", "report"])
+        )
+
     for module in output.transition_mapping.modules:
         manifest.extend(
             _write_chunked_markdown(
                 llm_pack_dir / "modules" / f"{slugify(module.name)}.md",
                 _build_module_dossier(module),
                 max_artifact_chars,
+                max_artifact_tokens,
                 kind="module-dossier",
                 tags=["module", module.name],
                 recommended_for=[module.name],
             )
         )
 
+    for flow in output.business_flows:
+        manifest.extend(
+            _write_chunked_markdown(
+                llm_pack_dir / "flows" / f"{slugify(flow.module_name)}-flow.md",
+                _build_business_flow_artifact(flow),
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="business-flow",
+                tags=["flow", flow.module_name],
+                recommended_for=[flow.module_name],
+            )
+        )
+
     for query in output.resolved_queries:
+        recommended_for = [query.name, *sorted(query_to_modules.get(query.name, []))]
         manifest.extend(
             _write_chunked_markdown(
                 llm_pack_dir / "queries" / f"{slugify(query.name)}.md",
                 _build_query_artifact(query),
                 max_artifact_chars,
+                max_artifact_tokens,
                 kind="query-artifact",
                 tags=["query", query.name, query.xml_key],
-                recommended_for=[query.name],
+                recommended_for=recommended_for,
             )
         )
 
@@ -248,27 +433,63 @@ def package_analysis(
         )
     )
 
+    load_bundles = _build_load_bundles(output, manifest)
+    output.load_bundles = load_bundles
+    for bundle in load_bundles:
+        bundle_path = llm_pack_dir / "bundles" / f"{slugify(bundle.name)}.json"
+        write_json(bundle_path, bundle)
+        manifest.append(
+            _manifest_entry(
+                "load-bundle",
+                bundle_path,
+                ["bundle", bundle.category, bundle.name],
+            )
+        )
+
+    load_plan = _build_load_plan(output, load_bundles)
+    write_json(llm_pack_dir / "load-plan.json", load_plan)
+    manifest.append(
+        _manifest_entry("load-plan", llm_pack_dir / "load-plan.json", ["bundle", "load-plan"])
+    )
+
     write_json(llm_pack_dir / "manifest.json", manifest)
     manifest.append(
         _manifest_entry("manifest", llm_pack_dir / "manifest.json", ["manifest", "llm"])
     )
-    return manifest
+    return manifest, load_bundles
+
+
+def _query_to_modules(
+    transition_mapping: TransitionMappingArtifact,
+) -> dict[str, set[str]]:
+    mapping: dict[str, set[str]] = defaultdict(set)
+    for module in transition_mapping.modules:
+        for query_name in module.query_artifacts:
+            mapping[query_name].add(module.name)
+    return mapping
 
 
 def _manifest_entry(kind: str, path: Path, tags: list[str]) -> ArtifactManifestEntry:
     size = len(path.read_text(encoding="utf-8")) if path.exists() else 0
-    return ArtifactManifestEntry(kind=kind, path=path.as_posix(), chars=size, tags=tags)
+    return ArtifactManifestEntry(
+        kind=kind,
+        path=path.as_posix(),
+        chars=size,
+        estimated_tokens=estimate_tokens(path.read_text(encoding="utf-8")) if path.exists() else 0,
+        tags=tags,
+    )
 
 
 def _write_chunked_markdown(
     path: Path,
     content: str,
     max_artifact_chars: int,
+    max_artifact_tokens: int,
     kind: str,
     tags: list[str],
     recommended_for: list[str],
 ) -> list[ArtifactManifestEntry]:
-    chunks = split_text_chunks(content, max_artifact_chars)
+    chunks = split_text_chunks_by_budget(content, max_artifact_chars, max_artifact_tokens)
     entries: list[ArtifactManifestEntry] = []
     if len(chunks) == 1:
         write_text(path, chunks[0])
@@ -277,6 +498,7 @@ def _write_chunked_markdown(
                 kind=kind,
                 path=path.as_posix(),
                 chars=len(chunks[0]),
+                estimated_tokens=estimate_tokens(chunks[0]),
                 tags=tags,
                 recommended_for=recommended_for,
             )
@@ -291,6 +513,7 @@ def _write_chunked_markdown(
                 kind=kind,
                 path=chunk_path.as_posix(),
                 chars=len(chunk),
+                estimated_tokens=estimate_tokens(chunk),
                 tags=tags + [f"part-{index:02d}"],
                 recommended_for=recommended_for,
             )
@@ -302,7 +525,8 @@ def _build_project_summary(output: AnalysisOutput) -> str:
     severe = [item for item in output.diagnostics if item.severity in {"error", "fatal"}]
     module_names = ", ".join(module.name for module in output.transition_mapping.modules[:10]) or "None"
     migration_order = ", ".join(
-        module.name for module in sorted(output.transition_mapping.modules, key=lambda item: item.confidence)
+        module.name
+        for module in sorted(output.transition_mapping.modules, key=lambda item: item.confidence)
     )
     return f"""# Project Summary
 
@@ -313,14 +537,16 @@ def _build_project_summary(output: AnalysisOutput) -> str:
 - Forms: {len(output.forms)}
 - SQL XML files: {len(output.sql_xml_files)}
 - Resolved queries: {len(output.resolved_queries)}
+- Business flows: {len(output.business_flows)}
 - Diagnostics: {len(output.diagnostics)} total, {len(severe)} severe
 
 ## Recommended LLM Load Order
 
 1. `project-summary.md`
-2. Module dossiers for the module you want to migrate first
-3. Query artifacts for queries attached to that module
-4. `diagnostics.md` and `prompt-recipes.md` for unresolved context
+2. `load-plan.json`
+3. The target module dossier and business flow artifact
+4. Only the query artifacts listed by that module bundle
+5. `diagnostics.md` and `prompt-recipes.md` for unresolved context
 
 ## Candidate Migration Modules
 
@@ -379,6 +605,33 @@ def _build_module_dossier(module: BusinessModuleArtifact) -> str:
 
 {_bullet_lines(module.notes)}
 """
+
+
+def _build_business_flow_artifact(flow: BusinessFlowArtifact) -> str:
+    parts = [f"# Business Flow: {flow.module_name}", ""]
+    if not flow.steps:
+        parts.extend(["- No business flow steps were recovered.", ""])
+    for index, step in enumerate(flow.steps, start=1):
+        parts.append(f"## Step {index}")
+        parts.append(f"- Trigger: {step.trigger}")
+        parts.append(f"- Handler: {step.handler}")
+        parts.append(f"- Queries: {', '.join(step.queries) or 'None'}")
+        parts.append(f"- XML references: {', '.join(step.xml_references) or 'None'}")
+        parts.append(f"- Replace tokens: {', '.join(step.replace_tokens) or 'None'}")
+        parts.append(f"- Called methods: {', '.join(step.called_methods) or 'None'}")
+        if step.sql_snippets:
+            parts.append(f"- SQL hints: {' | '.join(step.sql_snippets[:3])}")
+        parts.append(f"- Notes: {'; '.join(step.notes) or 'None'}")
+        parts.append("")
+    parts.append("## Unlinked Queries")
+    parts.append("")
+    parts.append(_bullet_lines(flow.unlinked_queries))
+    parts.append("")
+    parts.append("## Recommendations")
+    parts.append("")
+    parts.append(_bullet_lines(flow.recommendations))
+    parts.append("")
+    return "\n".join(parts)
 
 
 def _build_query_artifact(query: ResolvedQueryArtifact) -> str:
@@ -451,9 +704,10 @@ def _build_prompt_recipes(output: AnalysisOutput) -> str:
         "",
         "## Use When The Analyzer Fails",
         "",
-        "1. Feed the relevant module dossier first.",
-        "2. Add the query artifact if the problem involves SQL XML expansion.",
-        "3. Include the exact diagnostic block and ask the LLM to propose either a rule override or parser extension.",
+        "1. Feed `project-summary.md` and `load-plan.json` first.",
+        "2. Add the relevant module dossier and business flow artifact.",
+        "3. Add only the linked query artifacts if the problem involves SQL XML expansion.",
+        "4. Include the exact diagnostic block and ask the LLM to propose either a rule override or parser extension.",
         "",
         "## Suggested Follow-up Prompts",
         "",
@@ -466,7 +720,7 @@ def _build_prompt_recipes(output: AnalysisOutput) -> str:
     recipes.append("## Recommended Prompt Skeleton")
     recipes.append("")
     recipes.append(
-        "```text\nYou are continuing a Delphi-to-web transition. Use the attached project summary, module dossier, query artifact, and diagnostics. Explain the root cause, missing legacy assumptions, and the smallest rule or code change needed next.\n```"
+        "```text\nYou are continuing a Delphi-to-web transition. Use the attached project summary, load plan, module dossier, business flow artifact, query artifact, and diagnostics. Explain the root cause, missing legacy assumptions, and the smallest rule or migration design change needed next.\n```"
     )
     return "\n".join(recipes)
 
@@ -478,6 +732,11 @@ def _build_dependency_graph(output: AnalysisOutput) -> str:
         lines.append(f'  "{unit_node}" [label="{unit.unit_name}\\nunit"];')
         for dep in unit.interface_uses + unit.implementation_uses:
             lines.append(f'  "{unit_node}" -> "{slugify(dep)}";')
+        for method_flow in unit.method_flows:
+            for query_name in method_flow.query_names:
+                lines.append(
+                    f'  "{unit_node}" -> "{slugify(query_name)}" [label="{method_flow.method_name.split(".")[-1]}"];'
+                )
     for form in output.forms:
         if form.root_name:
             lines.append(f'  "{slugify(form.root_name)}" [label="{form.root_name}\\nform"];')
@@ -489,11 +748,82 @@ def _build_dependency_graph(output: AnalysisOutput) -> str:
         query_node = slugify(f"{query.xml_key}-{query.name}")
         lines.append(f'  "{query_node}" [label="{query.name}\\nquery"];')
         for trace in query.source_trace[1:]:
-            lines.append(
-                f'  "{query_node}" -> "{slugify(trace)}" [label="depends-on"];'
-            )
+            lines.append(f'  "{query_node}" -> "{slugify(trace)}" [label="depends-on"];')
     lines.append("}")
     return "\n".join(lines) + "\n"
+
+
+def _build_load_bundles(
+    output: AnalysisOutput,
+    manifest: list[ArtifactManifestEntry],
+) -> list[LoadBundleArtifact]:
+    bundles: list[LoadBundleArtifact] = []
+    summary_paths = [entry.path for entry in manifest if "project-overview" in entry.recommended_for]
+    overview_bundle = LoadBundleArtifact(
+        name="ProjectOverview",
+        category="overview",
+        artifact_paths=summary_paths,
+        estimated_tokens=sum(
+            entry.estimated_tokens for entry in manifest if entry.path in summary_paths
+        ),
+        recommended_prompt=(
+            "Load the project summary first, then inspect the module bundle for the migration target."
+        ),
+        notes=["Start every LLM session from this bundle."],
+    )
+    bundles.append(overview_bundle)
+
+    for module in output.transition_mapping.modules:
+        relevant = [
+            entry
+            for entry in manifest
+            if module.name in entry.recommended_for or "project-overview" in entry.recommended_for
+        ]
+        artifact_paths = [entry.path for entry in relevant]
+        estimated = sum(entry.estimated_tokens for entry in relevant)
+        bundles.append(
+            LoadBundleArtifact(
+                name=module.name,
+                category="module",
+                artifact_paths=artifact_paths,
+                estimated_tokens=estimated,
+                recommended_prompt=(
+                    f"Load the project summary, then the {module.name} module dossier, its business flow artifact, "
+                    "and only the listed query artifacts before proposing React/Spring migration steps."
+                ),
+                notes=[
+                    f"Confidence: {module.confidence}",
+                    f"Risk count: {len(module.risks)}",
+                    f"Query artifacts: {len(module.query_artifacts)}",
+                ],
+            )
+        )
+    return bundles
+
+
+def _build_load_plan(
+    output: AnalysisOutput,
+    bundles: list[LoadBundleArtifact],
+) -> dict:
+    module_priority = [
+        bundle
+        for bundle in bundles
+        if bundle.category == "module"
+    ]
+    module_priority.sort(key=lambda item: item.estimated_tokens)
+    return {
+        "overview_bundle": next(
+            (bundle.name for bundle in bundles if bundle.category == "overview"),
+            None,
+        ),
+        "recommended_module_order": [bundle.name for bundle in module_priority],
+        "bundles": bundles,
+        "cross_cutting_concerns": output.transition_mapping.cross_cutting_concerns,
+        "notes": [
+            "Prefer the smallest module bundle that still covers the target business flow.",
+            "Only add diagnostics when the current artifacts leave a concrete unanswered question.",
+        ],
+    }
 
 
 def _resolve_form_unit(form: FormSummary, unit_by_name: dict[str, PascalUnitSummary]) -> str | None:
@@ -569,7 +899,10 @@ def _build_spring_candidates(module_name: str, queries: list[ResolvedQueryArtifa
     candidates = [f"{module_name}Controller", f"{module_name}Service"]
     if any(query.expanded_sql.strip().lower().startswith("select") for query in queries):
         candidates.append(f"{module_name}QueryFacade")
-    if any(query.expanded_sql.strip().lower().startswith(("insert", "update", "delete", "merge")) for query in queries):
+    if any(
+        query.expanded_sql.strip().lower().startswith(("insert", "update", "delete", "merge"))
+        for query in queries
+    ):
         candidates.append(f"{module_name}CommandService")
     return sorted(dict.fromkeys(candidates))
 
@@ -594,6 +927,8 @@ def _unit_notes(unit: PascalUnitSummary) -> list[str]:
         notes.append(f"Published component fields: {', '.join(unit.component_fields[:8])}")
     if unit.published_properties:
         notes.append(f"Published properties: {', '.join(unit.published_properties[:8])}")
+    if unit.method_flows:
+        notes.append(f"Recovered method flows: {len(unit.method_flows)}")
     return notes
 
 

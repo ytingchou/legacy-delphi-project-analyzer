@@ -12,6 +12,8 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - SQL XML resolver that understands `main-query`, `sub-query`, internal/external
   references, and raw-copy semantics
 - LLM-ready artifact packaging in JSON and Markdown
+- Token-aware load bundles, business-flow dossiers, and leadership-facing complexity summaries
+- Static HTML dashboard output plus `serve-report` for local report preview
 - Diagnostics with prompt guidance for unresolved or low-confidence areas
 - Rule-driven knowledge store for reusable overrides and learned patterns
 
@@ -32,16 +34,23 @@ Optional flags:
 - `--phase discover --phase parse --phase analyze --phase package --phase learn`
 - `--rules-dir rules`
 - `--max-artifact-chars 40000`
+- `--max-artifact-tokens 10000`
 - `--fail-on-fatal`
 
-## v0.2 Highlights
+Serve the generated web report locally:
 
-- Binary `.dfm` files no longer short-circuit analysis. They are parsed with a
-  heuristic token scanner and surfaced as warnings rather than hard failures.
-- Pascal parsing now extracts `published` fields, component declarations, and
-  property names to improve module and form linkage.
-- SQL XML diagnostics now cover duplicate query names, invalid `sql-copy`
-  targets, ambiguous same-name resolution, and richer cycle traces.
+```bash
+legacy-delphi-analyzer serve-report /path/to/artifacts/report
+```
+
+## v0.3 Highlights
+
+- Artifacts are now packaged with an approximate token budget rather than only
+  a character budget.
+- Each inferred business module gets a business-flow dossier and an LLM load
+  bundle that lists the minimum useful artifact set.
+- The analyzer now emits a boss-facing complexity report, executive summary,
+  and a static HTML dashboard under `report/index.html`.
 
 ## Override File
 

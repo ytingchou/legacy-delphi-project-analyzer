@@ -58,6 +58,13 @@ end.
             self.assertTrue(
                 any(name.endswith("grdOrdersDblClick") for name in summary.event_handlers)
             )
+            method_flows = {
+                item.method_name.split(".")[-1]: item
+                for item in summary.method_flows
+            }
+            self.assertIn("grdOrdersDblClick", method_flows)
+            self.assertIn("OrderLookup", method_flows["grdOrdersDblClick"].query_names)
+            self.assertIn("status", method_flows["grdOrdersDblClick"].replace_tokens)
 
     def test_binary_dfm_heuristic_extracts_components_and_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

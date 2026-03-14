@@ -42,6 +42,16 @@ class PascalClassSummary:
 
 
 @dataclass(slots=True)
+class PascalMethodFlow:
+    method_name: str
+    query_names: list[str] = field(default_factory=list)
+    xml_references: list[str] = field(default_factory=list)
+    replace_tokens: list[str] = field(default_factory=list)
+    called_methods: list[str] = field(default_factory=list)
+    sql_snippets: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class PascalUnitSummary:
     unit_name: str
     file_path: str
@@ -58,6 +68,7 @@ class PascalUnitSummary:
     xml_references: list[str] = field(default_factory=list)
     replace_tokens: list[str] = field(default_factory=list)
     referenced_query_names: list[str] = field(default_factory=list)
+    method_flows: list[PascalMethodFlow] = field(default_factory=list)
     linked_dfm: str | None = None
 
 
@@ -151,6 +162,64 @@ class BusinessModuleArtifact:
 
 
 @dataclass(slots=True)
+class BusinessFlowStep:
+    trigger: str
+    handler: str
+    queries: list[str] = field(default_factory=list)
+    xml_references: list[str] = field(default_factory=list)
+    replace_tokens: list[str] = field(default_factory=list)
+    called_methods: list[str] = field(default_factory=list)
+    sql_snippets: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class BusinessFlowArtifact:
+    module_name: str
+    steps: list[BusinessFlowStep] = field(default_factory=list)
+    unlinked_queries: list[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class LoadBundleArtifact:
+    name: str
+    category: str
+    artifact_paths: list[str] = field(default_factory=list)
+    estimated_tokens: int = 0
+    recommended_prompt: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ModuleComplexityScore:
+    module_name: str
+    score: int
+    level: str
+    forms: int = 0
+    queries: int = 0
+    event_steps: int = 0
+    unresolved_placeholders: int = 0
+    risks: list[str] = field(default_factory=list)
+    drivers: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ComplexityReport:
+    project_score: int
+    level: str
+    total_forms: int
+    total_units: int
+    total_queries: int
+    total_business_flows: int
+    total_diagnostics: int
+    total_unresolved_placeholders: int
+    module_scores: list[ModuleComplexityScore] = field(default_factory=list)
+    executive_summary: list[str] = field(default_factory=list)
+    migration_recommendations: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class TransitionMappingArtifact:
     modules: list[BusinessModuleArtifact] = field(default_factory=list)
     shared_services: list[str] = field(default_factory=list)
@@ -162,6 +231,7 @@ class ArtifactManifestEntry:
     kind: str
     path: str
     chars: int
+    estimated_tokens: int = 0
     tags: list[str] = field(default_factory=list)
     recommended_for: list[str] = field(default_factory=list)
 
@@ -176,6 +246,9 @@ class AnalysisOutput:
     transition_mapping: TransitionMappingArtifact = field(
         default_factory=TransitionMappingArtifact
     )
+    business_flows: list[BusinessFlowArtifact] = field(default_factory=list)
+    load_bundles: list[LoadBundleArtifact] = field(default_factory=list)
+    complexity_report: ComplexityReport | None = None
     diagnostics: list[DiagnosticRecord] = field(default_factory=list)
     manifest: list[ArtifactManifestEntry] = field(default_factory=list)
     output_dir: str | None = None
