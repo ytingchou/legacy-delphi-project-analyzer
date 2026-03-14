@@ -1,0 +1,8 @@
+<sql-mapping>
+  <sub-query name="BaseWhere">
+    <parameter name="status" data_type="String" sample="ACTIVE" />
+    <sql-body><![CDATA[
+WHERE o.status = :status
+    ]]></sql-body>
+  </sub-query>
+</sql-mapping>

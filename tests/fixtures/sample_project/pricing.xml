@@ -1,0 +1,25 @@
+<sql-mapping>
+  <main-query name="SharedSelect">
+    <sql-body><![CDATA[
+SELECT o.order_no, o.customer_id
+FROM orders o
+    ]]></sql-body>
+    <ext-sql-refer-to xml="common.xml" sub-query="BaseWhere" />
+  </main-query>
+
+  <main-query name="OrderLookup">
+    <sql-refer-to main-query="SharedSelect" />
+    <parameter name="customerId" data_type="String" sample="C001" />
+    <sql-body><![CDATA[
+AND o.customer_id = :customerId
+AND o.price_rule = :fPriceCheckRule
+    ]]></sql-body>
+  </main-query>
+
+  <main-query name="OrderLookupRawCopy">
+    <sql-copy main-query="SharedSelect" />
+    <sql-body><![CDATA[
+WHERE o.customer_id = :customerId
+    ]]></sql-body>
+  </main-query>
+</sql-mapping>

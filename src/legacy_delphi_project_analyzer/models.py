@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field, is_dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass(slots=True)
+class SourceLocation:
+    file_path: str
+    line: int | None = None
+    column: int | None = None
+
+
+@dataclass(slots=True)
+class DiagnosticRecord:
+    severity: str
+    code: str
+    message: str
+    location: SourceLocation | None = None
+    context: str | None = None
+    suggestion: str | None = None
+    prompt_hint: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ProjectInventory:
+    project_root: str
+    total_files: int
+    total_size_bytes: int
+    pas_files: list[str] = field(default_factory=list)
+    dfm_files: list[str] = field(default_factory=list)
+    xml_files: list[str] = field(default_factory=list)
+    other_files: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class PascalClassSummary:
+    name: str
+    ancestor: str | None = None
+
+
+@dataclass(slots=True)
+class PascalUnitSummary:
+    unit_name: str
+    file_path: str
+    interface_uses: list[str] = field(default_factory=list)
+    implementation_uses: list[str] = field(default_factory=list)
+    classes: list[PascalClassSummary] = field(default_factory=list)
+    form_classes: list[str] = field(default_factory=list)
+    methods: list[str] = field(default_factory=list)
+    event_handlers: list[str] = field(default_factory=list)
+    published_fields: list[str] = field(default_factory=list)
+    published_properties: list[str] = field(default_factory=list)
+    component_fields: list[str] = field(default_factory=list)
+    sql_hints: list[str] = field(default_factory=list)
+    xml_references: list[str] = field(default_factory=list)
+    replace_tokens: list[str] = field(default_factory=list)
+    referenced_query_names: list[str] = field(default_factory=list)
+    linked_dfm: str | None = None
+
+
+@dataclass(slots=True)
+class ComponentSummary:
+    name: str
+    component_type: str
+    path: str
+    properties: dict[str, str] = field(default_factory=dict)
+    events: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class FormSummary:
+    file_path: str
+    root_name: str | None
+    root_type: str | None
+    linked_unit: str | None = None
+    captions: list[str] = field(default_factory=list)
+    datasets: list[str] = field(default_factory=list)
+    components: list[ComponentSummary] = field(default_factory=list)
+    event_bindings: dict[str, str] = field(default_factory=dict)
+    is_binary: bool = False
+    parse_mode: str = "text"
+    parse_notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class QueryParameter:
+    name: str
+    data_type: str | None = None
+    sample: str | None = None
+    default: str | None = None
+
+
+@dataclass(slots=True)
+class QueryFragment:
+    kind: str
+    text: str | None = None
+    name: str | None = None
+    xml_name: str | None = None
+    target_kind: str | None = None
+
+
+@dataclass(slots=True)
+class QueryDefinition:
+    file_path: str
+    xml_key: str
+    kind: str
+    name: str
+    raw_body: str
+    parameters: list[QueryParameter] = field(default_factory=list)
+    fragments: list[QueryFragment] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SqlXmlFileSummary:
+    file_path: str
+    xml_keys: list[str]
+    main_queries: list[QueryDefinition] = field(default_factory=list)
+    sub_queries: list[QueryDefinition] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ResolvedQueryArtifact:
+    file_path: str
+    xml_key: str
+    kind: str
+    name: str
+    raw_body: str
+    expanded_sql: str
+    parameter_definitions: list[QueryParameter] = field(default_factory=list)
+    discovered_placeholders: list[str] = field(default_factory=list)
+    unresolved_placeholders: list[str] = field(default_factory=list)
+    source_trace: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class BusinessModuleArtifact:
+    name: str
+    confidence: str
+    source_units: list[str] = field(default_factory=list)
+    forms: list[str] = field(default_factory=list)
+    query_artifacts: list[str] = field(default_factory=list)
+    react_candidates: list[str] = field(default_factory=list)
+    spring_candidates: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class TransitionMappingArtifact:
+    modules: list[BusinessModuleArtifact] = field(default_factory=list)
+    shared_services: list[str] = field(default_factory=list)
+    cross_cutting_concerns: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ArtifactManifestEntry:
+    kind: str
+    path: str
+    chars: int
+    tags: list[str] = field(default_factory=list)
+    recommended_for: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AnalysisOutput:
+    inventory: ProjectInventory
+    pascal_units: list[PascalUnitSummary] = field(default_factory=list)
+    forms: list[FormSummary] = field(default_factory=list)
+    sql_xml_files: list[SqlXmlFileSummary] = field(default_factory=list)
+    resolved_queries: list[ResolvedQueryArtifact] = field(default_factory=list)
+    transition_mapping: TransitionMappingArtifact = field(
+        default_factory=TransitionMappingArtifact
+    )
+    diagnostics: list[DiagnosticRecord] = field(default_factory=list)
+    manifest: list[ArtifactManifestEntry] = field(default_factory=list)
+    output_dir: str | None = None
+
+
+def to_jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return {key: to_jsonable(item) for key, item in asdict(value).items()}
+    if isinstance(value, Path):
+        return value.as_posix()
+    if isinstance(value, dict):
+        return {str(key): to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [to_jsonable(item) for item in value]
+    return value
