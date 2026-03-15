@@ -326,6 +326,74 @@ class TransitionSpecArtifact:
 
 
 @dataclass(slots=True)
+class BffSqlLogicArtifact:
+    module_name: str
+    endpoint_name: str
+    http_method: str
+    route_path: str
+    query_name: str
+    purpose: str
+    request_dto: str | None = None
+    response_dto: str | None = None
+    request_fields: list[TransitionFieldSpec] = field(default_factory=list)
+    response_fields: list[TransitionFieldSpec] = field(default_factory=list)
+    compact_sql_summary: str = ""
+    oracle_19c_notes: list[str] = field(default_factory=list)
+    placeholder_strategy: list[str] = field(default_factory=list)
+    implementation_steps: list[str] = field(default_factory=list)
+    repository_contract: list[str] = field(default_factory=list)
+    service_logic: list[str] = field(default_factory=list)
+    evidence_queries: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class UiPseudoArtifact:
+    module_name: str
+    page_name: str
+    route_path: str
+    purpose: str
+    layout_sections: list[str] = field(default_factory=list)
+    component_tree: list[str] = field(default_factory=list)
+    inputs: list[TransitionFieldSpec] = field(default_factory=list)
+    display_fields: list[TransitionFieldSpec] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)
+    api_dependencies: list[str] = field(default_factory=list)
+    interaction_steps: list[str] = field(default_factory=list)
+    state_model: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class UiReferenceArtifact:
+    module_name: str
+    page_name: str
+    route_path: str
+    title: str
+    summary: str
+    layout_sections: list[str] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)
+    api_dependencies: list[str] = field(default_factory=list)
+    html_file_path: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class UiIntegrationArtifact:
+    module_name: str
+    page_name: str
+    route_path: str
+    target_feature_dir: str
+    suggested_files: list[str] = field(default_factory=list)
+    api_dependencies: list[str] = field(default_factory=list)
+    dto_dependencies: list[str] = field(default_factory=list)
+    integration_steps: list[str] = field(default_factory=list)
+    acceptance_checks: list[str] = field(default_factory=list)
+    handoff_artifacts: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LlmRunArtifact:
     run_id: str
     artifact_kind: str
@@ -406,6 +474,10 @@ class AnalysisOutput:
     )
     business_flows: list[BusinessFlowArtifact] = field(default_factory=list)
     transition_specs: list[TransitionSpecArtifact] = field(default_factory=list)
+    bff_sql_artifacts: list[BffSqlLogicArtifact] = field(default_factory=list)
+    ui_pseudo_artifacts: list[UiPseudoArtifact] = field(default_factory=list)
+    ui_reference_artifacts: list[UiReferenceArtifact] = field(default_factory=list)
+    ui_integration_artifacts: list[UiIntegrationArtifact] = field(default_factory=list)
     load_bundles: list[LoadBundleArtifact] = field(default_factory=list)
     prompt_packs: list[PromptPackArtifact] = field(default_factory=list)
     failure_triage: list[FailureTriageArtifact] = field(default_factory=list)

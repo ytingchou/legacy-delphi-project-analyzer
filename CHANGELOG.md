@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.0
+
+- Added compact BFF SQL logic artifacts under `llm-pack/bff-sql/` plus `intermediate/bff_sql_artifacts.json`.
+- Added qwen3-friendly backend SQL prompt packs so weak 128k-token models can generate one Spring Boot Oracle 19c implementation slice at a time.
+- Added specialized backend load bundles and load-plan sections for bounded BFF SQL generation.
+- Added regression coverage for BFF SQL artifacts, bundles, and prompt-pack generation.
+
 ## v1.2.0
 
 - Added model profiles for weak 128k-token LLMs, including `qwen3_128k_weak` and `qwen3_128k_validate`.

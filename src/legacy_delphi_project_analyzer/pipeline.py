@@ -6,9 +6,11 @@ from legacy_delphi_project_analyzer.analyzers.dfm import analyze_dfm_file
 from legacy_delphi_project_analyzer.analyzers.pascal import analyze_pascal_file
 from legacy_delphi_project_analyzer.analyzers.sql_xml import SqlXmlResolver, parse_sql_xml_file
 from legacy_delphi_project_analyzer.artifacts import (
+    build_bff_sql_logic_artifacts,
     build_business_flows,
     build_transition_mapping,
     build_transition_specs,
+    build_ui_delivery_artifacts,
     package_analysis,
 )
 from legacy_delphi_project_analyzer.knowledge import KnowledgeStore, load_bootstrap_rules
@@ -151,6 +153,18 @@ def run_analysis(
             output.business_flows,
             output.forms,
             output.resolved_queries,
+        )
+        output.bff_sql_artifacts = build_bff_sql_logic_artifacts(
+            output.transition_specs,
+            output.resolved_queries,
+        )
+        (
+            output.ui_pseudo_artifacts,
+            output.ui_reference_artifacts,
+            output.ui_integration_artifacts,
+        ) = build_ui_delivery_artifacts(
+            output.transition_specs,
+            output.business_flows,
         )
         output.complexity_report = build_complexity_report(output)
 

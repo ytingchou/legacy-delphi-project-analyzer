@@ -133,6 +133,192 @@ def build_prompt_packs(
             )
         )
 
+    for artifact in output.bff_sql_artifacts:
+        raw_context = _artifact_paths_for_targets(
+            manifest,
+            targets=[artifact.module_name, artifact.query_name, artifact.endpoint_name, "backend-sql"],
+            allowed_kinds={"bff-sql", "transition-spec", "business-flow", "query-artifact"},
+        )
+        context_paths = _select_context_paths(
+            list(dict.fromkeys(raw_context + knowledge_paths[:1])),
+            path_to_tokens,
+            max_tokens=profile["max_tokens"],
+            max_paths=profile["max_paths"],
+        )
+        packs.append(
+            PromptPackArtifact(
+                name=f"{artifact.module_name}{artifact.query_name}BffSql",
+                category="backend-sql-generation",
+                goal="generate_bff_oracle_sql_logic",
+                target_model=target_model,
+                objective=f"Generate a bounded Spring Boot BFF Oracle 19c implementation plan for {artifact.endpoint_name}.",
+                subject_name=f"{artifact.module_name}:{artifact.endpoint_name}",
+                issue_summary=f"Generate one endpoint-sized backend implementation slice for query {artifact.query_name}.",
+                context_paths=context_paths,
+                estimated_tokens=_sum_tokens(context_paths, path_to_tokens),
+                context_budget_tokens=profile["max_tokens"],
+                prompt=_bff_sql_generation_prompt(artifact.module_name, artifact.endpoint_name, artifact.query_name),
+                fallback_prompt=_bff_sql_generation_fallback_prompt(artifact.query_name),
+                verification_prompt=_bff_sql_generation_verification_prompt(artifact.endpoint_name),
+                expected_response_schema={
+                    "module_name": "string",
+                    "endpoint_name": "string",
+                    "controller_contract": "string",
+                    "service_steps": ["string"],
+                    "repository_method": "string",
+                    "sql_execution_plan": ["string"],
+                    "placeholder_resolution": ["string"],
+                    "dto_mapping": ["string"],
+                    "missing_assumptions": ["string"],
+                },
+                acceptance_checks=[
+                    "The response stays scoped to one endpoint and one query.",
+                    "Oracle 19c handling is grounded in the attached SQL artifact.",
+                    "Missing assumptions are explicit instead of guessed into code.",
+                ],
+                notes=["Use the compact BFF SQL artifact before opening the full query artifact."],
+            )
+        )
+
+    for artifact in output.ui_pseudo_artifacts:
+        raw_context = _artifact_paths_for_targets(
+            manifest,
+            targets=[artifact.module_name, artifact.page_name, "ui-pseudo"],
+            allowed_kinds={"ui-pseudo", "transition-spec", "business-flow", "bff-sql"},
+        )
+        context_paths = _select_context_paths(
+            list(dict.fromkeys(raw_context + knowledge_paths[:1])),
+            path_to_tokens,
+            max_tokens=profile["max_tokens"],
+            max_paths=profile["max_paths"],
+        )
+        packs.append(
+            PromptPackArtifact(
+                name=f"{artifact.module_name}{artifact.page_name}PseudoUi",
+                category="ui-pseudo-generation",
+                goal="generate_react_pseudo_ui",
+                target_model=target_model,
+                objective=f"Generate one React pseudo UI plan for page {artifact.page_name}.",
+                subject_name=f"{artifact.module_name}:{artifact.page_name}",
+                issue_summary="Produce a compact page-level pseudo UI artifact for the first migration slice.",
+                context_paths=context_paths,
+                estimated_tokens=_sum_tokens(context_paths, path_to_tokens),
+                context_budget_tokens=profile["max_tokens"],
+                prompt=_react_pseudo_ui_prompt(artifact.module_name, artifact.page_name),
+                fallback_prompt=_react_pseudo_ui_fallback_prompt(artifact.page_name),
+                verification_prompt=_react_pseudo_ui_verification_prompt(artifact.page_name),
+                expected_response_schema={
+                    "module_name": "string",
+                    "page_name": "string",
+                    "layout_tree": ["string"],
+                    "components": ["string"],
+                    "form_state": ["string"],
+                    "actions": ["string"],
+                    "data_dependencies": ["string"],
+                    "open_questions": ["string"],
+                },
+                acceptance_checks=[
+                    "The pseudo UI stays within one page boundary.",
+                    "Data dependencies are limited to attached APIs and queries.",
+                    "Open questions are explicit for missing UX assumptions.",
+                ],
+                notes=["Generate the pseudo UI before attempting a detailed React or HTML reference implementation."],
+            )
+        )
+
+    for artifact in output.ui_reference_artifacts:
+        raw_context = _artifact_paths_for_targets(
+            manifest,
+            targets=[artifact.module_name, artifact.page_name, "ui-reference", "ui-pseudo"],
+            allowed_kinds={"ui-reference", "ui-reference-html", "ui-pseudo", "transition-spec"},
+        )
+        context_paths = _select_context_paths(
+            raw_context,
+            path_to_tokens,
+            max_tokens=profile["max_tokens"],
+            max_paths=profile["max_paths"],
+        )
+        packs.append(
+            PromptPackArtifact(
+                name=f"{artifact.module_name}{artifact.page_name}ReferenceUi",
+                category="ui-reference-generation",
+                goal="generate_react_reference_ui",
+                target_model=target_model,
+                objective=f"Generate a React reference UI plan aligned to the HTML reference for page {artifact.page_name}.",
+                subject_name=f"{artifact.module_name}:{artifact.page_name}",
+                issue_summary="Use the pseudo UI plus HTML reference to derive a bounded React reference implementation shape.",
+                context_paths=context_paths,
+                estimated_tokens=_sum_tokens(context_paths, path_to_tokens),
+                context_budget_tokens=profile["max_tokens"],
+                prompt=_react_reference_ui_prompt(artifact.module_name, artifact.page_name),
+                fallback_prompt=_react_reference_ui_fallback_prompt(artifact.page_name),
+                verification_prompt=_react_reference_ui_verification_prompt(artifact.page_name),
+                expected_response_schema={
+                    "module_name": "string",
+                    "page_name": "string",
+                    "react_component_outline": ["string"],
+                    "html_sections": ["string"],
+                    "styling_direction": ["string"],
+                    "api_bindings": ["string"],
+                    "missing_assumptions": ["string"],
+                },
+                acceptance_checks=[
+                    "The response keeps the HTML reference and React outline aligned.",
+                    "The page structure remains scoped to one route.",
+                    "API bindings only mention attached dependencies.",
+                ],
+                notes=["Use the HTML file as a visual reference, not as production markup."],
+            )
+        )
+
+    for artifact in output.ui_integration_artifacts:
+        raw_context = _artifact_paths_for_targets(
+            manifest,
+            targets=[artifact.module_name, artifact.page_name, "ui-integration", "ui-pseudo", "backend-sql"],
+            allowed_kinds={"ui-integration", "ui-pseudo", "ui-reference", "ui-reference-html", "bff-sql", "transition-spec"},
+        )
+        context_paths = _select_context_paths(
+            list(dict.fromkeys(raw_context + knowledge_paths[:1])),
+            path_to_tokens,
+            max_tokens=profile["max_tokens"],
+            max_paths=profile["max_paths"],
+        )
+        packs.append(
+            PromptPackArtifact(
+                name=f"{artifact.module_name}{artifact.page_name}UiIntegration",
+                category="ui-integration-generation",
+                goal="integrate_react_transition_ui",
+                target_model=target_model,
+                objective=f"Integrate the bounded UI slice for page {artifact.page_name} into another React transition project.",
+                subject_name=f"{artifact.module_name}:{artifact.page_name}",
+                issue_summary="Produce route, file, API, and state integration guidance without broadening scope.",
+                context_paths=context_paths,
+                estimated_tokens=_sum_tokens(context_paths, path_to_tokens),
+                context_budget_tokens=profile["max_tokens"],
+                prompt=_react_integration_prompt(artifact.module_name, artifact.page_name),
+                fallback_prompt=_react_integration_fallback_prompt(artifact.page_name),
+                verification_prompt=_react_integration_verification_prompt(artifact.page_name),
+                expected_response_schema={
+                    "module_name": "string",
+                    "page_name": "string",
+                    "target_feature_dir": "string",
+                    "files_to_create": ["string"],
+                    "files_to_update": ["string"],
+                    "route_registration": ["string"],
+                    "api_client_contracts": ["string"],
+                    "state_modules": ["string"],
+                    "integration_order": ["string"],
+                    "risks": ["string"],
+                },
+                acceptance_checks=[
+                    "Integration output names concrete files and route changes.",
+                    "The plan stays aligned to the attached page and backend artifacts.",
+                    "Risks are explicit when another project dependency is still unknown.",
+                ],
+                notes=["Use after the pseudo UI and HTML reference artifacts are accepted."],
+            )
+        )
+
     for query in output.resolved_queries:
         if not (query.unresolved_placeholders or query.warnings):
             continue
@@ -694,6 +880,22 @@ def _select_context_paths(
     return selected
 
 
+def _artifact_paths_for_targets(
+    manifest: list[ArtifactManifestEntry],
+    *,
+    targets: list[str],
+    allowed_kinds: set[str],
+) -> list[str]:
+    selected = []
+    normalized_targets = {item.lower() for item in targets}
+    for entry in manifest:
+        if entry.kind not in allowed_kinds:
+            continue
+        if normalized_targets.intersection(item.lower() for item in entry.recommended_for):
+            selected.append(entry.path)
+    return list(dict.fromkeys(selected))
+
+
 def _query_related_module_names(
     query_name: str,
     manifest: list[ArtifactManifestEntry],
@@ -885,6 +1087,101 @@ def _transition_spec_validation_verification_prompt(module_name: str) -> str:
         f"Verify the spec validation result for module {module_name}.\n"
         "Check that unsupported items are tied to a concrete evidence gap and that the revised first slice is still bounded.\n"
         "Return strict JSON with keys: verified_supported_items, verified_unsupported_items, verified_first_slice."
+    )
+
+
+def _bff_sql_generation_prompt(module_name: str, endpoint_name: str, query_name: str) -> str:
+    return (
+        f"Generate Java Spring Boot BFF Oracle 19c implementation logic for module {module_name}, endpoint {endpoint_name}, query {query_name}.\n"
+        "Use only the attached compact BFF SQL artifact, transition spec, business flow, and query artifact.\n"
+        "Keep the scope to one endpoint and one repository method.\n"
+        "Return strict JSON with keys: module_name, endpoint_name, controller_contract, service_steps, repository_method, sql_execution_plan, placeholder_resolution, dto_mapping, missing_assumptions."
+    )
+
+
+def _bff_sql_generation_fallback_prompt(query_name: str) -> str:
+    return (
+        f"For query {query_name}, do not generate full source code.\n"
+        "Only describe the controller contract, one service method outline, one repository method, and the missing assumptions that still block implementation."
+    )
+
+
+def _bff_sql_generation_verification_prompt(endpoint_name: str) -> str:
+    return (
+        f"Verify the BFF SQL implementation plan for endpoint {endpoint_name}.\n"
+        "Reject any repository, DTO, or placeholder handling detail that is not supported by the attached artifacts.\n"
+        "Return strict JSON with keys: supported_items, unsupported_items, remaining_unknowns."
+    )
+
+
+def _react_pseudo_ui_prompt(module_name: str, page_name: str) -> str:
+    return (
+        f"Generate a React pseudo UI plan for module {module_name}, page {page_name}.\n"
+        "Use only the attached pseudo UI, transition spec, business flow, and backend SQL artifacts.\n"
+        "Keep the output at page-layout and state-model level.\n"
+        "Return strict JSON with keys: module_name, page_name, layout_tree, components, form_state, actions, data_dependencies, open_questions."
+    )
+
+
+def _react_pseudo_ui_fallback_prompt(page_name: str) -> str:
+    return (
+        f"For page {page_name}, do not design the whole feature set.\n"
+        "Only produce the minimum layout tree, primary actions, and state buckets needed for the first slice."
+    )
+
+
+def _react_pseudo_ui_verification_prompt(page_name: str) -> str:
+    return (
+        f"Verify the pseudo UI plan for page {page_name}.\n"
+        "Check that every component, action, and API dependency is backed by attached artifacts.\n"
+        "Return strict JSON with keys: supported_items, unsupported_items, remaining_unknowns."
+    )
+
+
+def _react_reference_ui_prompt(module_name: str, page_name: str) -> str:
+    return (
+        f"Generate a React reference UI outline for module {module_name}, page {page_name}.\n"
+        "Use only the attached pseudo UI artifact and HTML reference UI.\n"
+        "Keep the output aligned to one route and one bounded migration slice.\n"
+        "Return strict JSON with keys: module_name, page_name, react_component_outline, html_sections, styling_direction, api_bindings, missing_assumptions."
+    )
+
+
+def _react_reference_ui_fallback_prompt(page_name: str) -> str:
+    return (
+        f"For page {page_name}, do not generate full JSX.\n"
+        "Only describe the component outline, HTML section mapping, and the API bindings required for the first slice."
+    )
+
+
+def _react_reference_ui_verification_prompt(page_name: str) -> str:
+    return (
+        f"Verify the React reference UI outline for page {page_name}.\n"
+        "Reject any section, binding, or style direction that is not grounded in the pseudo UI or HTML reference.\n"
+        "Return strict JSON with keys: supported_items, unsupported_items, remaining_unknowns."
+    )
+
+
+def _react_integration_prompt(module_name: str, page_name: str) -> str:
+    return (
+        f"Integrate the React transition UI for module {module_name}, page {page_name}, into another React project.\n"
+        "Use only the attached UI integration, pseudo UI, HTML reference, transition spec, and backend SQL artifacts.\n"
+        "Return strict JSON with keys: module_name, page_name, target_feature_dir, files_to_create, files_to_update, route_registration, api_client_contracts, state_modules, integration_order, risks."
+    )
+
+
+def _react_integration_fallback_prompt(page_name: str) -> str:
+    return (
+        f"For page {page_name}, do not plan the whole application.\n"
+        "Only describe the files, route registration, API client contracts, and state modules needed for the first integration slice."
+    )
+
+
+def _react_integration_verification_prompt(page_name: str) -> str:
+    return (
+        f"Verify the integration plan for page {page_name}.\n"
+        "Reject any file path, route, or API contract that is not supported by the attached artifacts.\n"
+        "Return strict JSON with keys: supported_items, unsupported_items, remaining_unknowns."
     )
 
 

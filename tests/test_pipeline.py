@@ -28,11 +28,30 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(
                 (output_root / "llm-pack" / "transition-specs" / "orderentry-transition-spec.md").exists()
             )
+            self.assertTrue(
+                (output_root / "llm-pack" / "bff-sql" / "orderentry-orderlookup-bff-sql.md").exists()
+            )
+            self.assertTrue(
+                (output_root / "llm-pack" / "ui-pseudo" / "orderentry-orderentrypage-pseudo-ui.md").exists()
+            )
+            self.assertTrue(
+                (output_root / "llm-pack" / "ui-reference" / "orderentry-orderentrypage-reference-ui.html").exists()
+            )
+            self.assertTrue(
+                (output_root / "llm-pack" / "ui-integration" / "orderentry-orderentrypage-ui-integration.md").exists()
+            )
             self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentry.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentrybffsql.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentryui.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentryuiintegration.json").exists())
             self.assertTrue((output_root / "llm-pack" / "load-plan.json").exists())
             self.assertTrue((output_root / "llm-pack" / "boss-summary.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderentrytransition.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderentryspecvalidate.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderentryorderlookupbffsql.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderentryorderentrypagepseudoui.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderentryorderentrypagereferenceui.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderentryorderentrypageuiintegration.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderlookupclarify.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderlookupintent.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "closure-summary.md").exists())
@@ -55,6 +74,10 @@ class PipelineTests(unittest.TestCase):
             self.assertGreaterEqual(len(output.transition_mapping.modules), 1)
             self.assertGreaterEqual(len(output.business_flows), 1)
             self.assertGreaterEqual(len(output.transition_specs), 1)
+            self.assertGreaterEqual(len(output.bff_sql_artifacts), 1)
+            self.assertGreaterEqual(len(output.ui_pseudo_artifacts), 1)
+            self.assertGreaterEqual(len(output.ui_reference_artifacts), 1)
+            self.assertGreaterEqual(len(output.ui_integration_artifacts), 1)
             self.assertGreaterEqual(len(output.prompt_packs), 3)
             self.assertGreaterEqual(len(output.failure_triage), 1)
             self.assertGreaterEqual(len(output.manifest), 5)
@@ -76,6 +99,26 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("GET /api/order-entry/order-lookup", spec_text)
             self.assertIn("customerId", spec_text)
             self.assertIn("OrderEntryOrderLookupRequest", spec_text)
+            bff_text = (output_root / "llm-pack" / "bff-sql" / "orderentry-orderlookup-bff-sql.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("Oracle 19c Notes", bff_text)
+            self.assertIn("Repository interface", bff_text)
+            ui_pseudo_text = (
+                output_root / "llm-pack" / "ui-pseudo" / "orderentry-orderentrypage-pseudo-ui.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Layout Sections", ui_pseudo_text)
+            self.assertIn("Interaction Steps", ui_pseudo_text)
+            ui_reference_html = (
+                output_root / "llm-pack" / "ui-reference" / "orderentry-orderentrypage-reference-ui.html"
+            ).read_text(encoding="utf-8")
+            self.assertIn("<!doctype html>", ui_reference_html.lower())
+            self.assertIn("Route /order-entry", ui_reference_html)
+            ui_integration_text = (
+                output_root / "llm-pack" / "ui-integration" / "orderentry-orderentrypage-ui-integration.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Target Placement", ui_integration_text)
+            self.assertIn("src/features/order-entry", ui_integration_text)
             prompt_text = (output_root / "prompt-pack" / "orderentrytransition.md").read_text(
                 encoding="utf-8"
             )
@@ -89,10 +132,22 @@ class PipelineTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("infer_placeholder_meaning", prompt_json)
+            bff_prompt_json = (
+                output_root / "prompt-pack" / "orderentryorderlookupbffsql.json"
+            ).read_text(encoding="utf-8")
+            self.assertIn("generate_bff_oracle_sql_logic", bff_prompt_json)
+            ui_prompt_json = (
+                output_root / "prompt-pack" / "orderentryorderentrypageuiintegration.json"
+            ).read_text(encoding="utf-8")
+            self.assertIn("integrate_react_transition_ui", ui_prompt_json)
             transition_specs_json = (
                 output_root / "intermediate" / "transition_specs.json"
             ).read_text(encoding="utf-8")
             self.assertIn("\"readiness_level\": \"needs-clarification\"", transition_specs_json)
+            bff_artifacts_json = (
+                output_root / "intermediate" / "bff_sql_artifacts.json"
+            ).read_text(encoding="utf-8")
+            self.assertIn("\"query_name\": \"OrderLookup\"", bff_artifacts_json)
             report_text = (output_root / "report" / "index.html").read_text(encoding="utf-8")
             self.assertIn("Complexity Dashboard", report_text)
             self.assertIn("Transition Specs", report_text)

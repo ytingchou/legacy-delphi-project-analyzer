@@ -22,6 +22,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Feedback learning plus prompt-effectiveness scoring for management reporting
 - Direct OpenAI-compatible LLM execution with configurable token limits
 - Module-level transition spec generation with React pages, Spring endpoints, DTOs, readiness scores, and first-slice recommendations
+- Compact BFF SQL logic artifacts for Spring Boot + Oracle 19c implementation handoff
 - Runtime orchestration outputs for multi-phase loops, blocker queues, and resumable handoff state
 - Qwen3-oriented model profiles, task packs, and file-based Cline inbox/outbox integration
 
@@ -122,6 +123,25 @@ Each spec includes:
 Prompt packs now also include `*SpecValidate` artifacts so your internal weak LLM can
 check whether the generated transition spec is still grounded in the available evidence
 before the team starts implementing React or Spring code.
+
+## v1.3 Backend SQL Handoff
+
+`analyze` now emits backend implementation handoff artifacts under:
+
+- `llm-pack/bff-sql/`
+- `intermediate/bff_sql_artifacts.json`
+
+Each BFF SQL artifact is intentionally compact so a weak `qwen3`-class model can load
+one endpoint at a time and stay well below the practical token budget. The artifacts
+include:
+
+- Oracle 19c notes and placeholder strategy
+- Request/response field summaries
+- Repository and service-layer implementation steps
+- Endpoint-sized Spring Boot BFF contracts
+
+`load-plan.json` also includes backend-specific bundle ordering, and prompt packs such
+as `*BffSql` can be executed with `run-llm` to generate one bounded backend slice at a time.
 
 ## Runtime Orchestration
 

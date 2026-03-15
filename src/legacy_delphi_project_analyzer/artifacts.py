@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from html import escape
 from pathlib import Path
 import re
 
 from legacy_delphi_project_analyzer.models import (
     AnalysisOutput,
     ArtifactManifestEntry,
+    BffSqlLogicArtifact,
     BusinessFlowArtifact,
     BusinessFlowStep,
     BusinessModuleArtifact,
@@ -22,6 +24,9 @@ from legacy_delphi_project_analyzer.models import (
     TransitionFieldSpec,
     TransitionMappingArtifact,
     TransitionSpecArtifact,
+    UiIntegrationArtifact,
+    UiPseudoArtifact,
+    UiReferenceArtifact,
 )
 from legacy_delphi_project_analyzer.feedback import (
     build_prompt_effectiveness_report,
@@ -43,6 +48,7 @@ from legacy_delphi_project_analyzer.reporting import (
 from legacy_delphi_project_analyzer.utils import (
     ensure_directory,
     estimate_tokens,
+    trim_sql_snippet,
     slugify,
     split_text_chunks_by_budget,
     write_json,
@@ -325,6 +331,131 @@ def build_transition_specs(
     return specs
 
 
+def build_bff_sql_logic_artifacts(
+    transition_specs: list[TransitionSpecArtifact],
+    resolved_queries: list[ResolvedQueryArtifact],
+) -> list[BffSqlLogicArtifact]:
+    query_by_name = {item.name: item for item in resolved_queries}
+    artifacts: list[BffSqlLogicArtifact] = []
+
+    for spec in transition_specs:
+        dto_by_name = {item.name: item for item in spec.dtos}
+        for endpoint in spec.backend_endpoints:
+            if not endpoint.query_artifacts:
+                continue
+            primary_query_name = endpoint.query_artifacts[0]
+            query = query_by_name.get(primary_query_name)
+            if query is None:
+                continue
+            request_dto = dto_by_name.get(endpoint.request_dto) if endpoint.request_dto else None
+            response_dto = dto_by_name.get(endpoint.response_dto) if endpoint.response_dto else None
+            artifacts.append(
+                BffSqlLogicArtifact(
+                    module_name=spec.module_name,
+                    endpoint_name=endpoint.name,
+                    http_method=endpoint.method,
+                    route_path=endpoint.path,
+                    query_name=query.name,
+                    purpose=endpoint.purpose,
+                    request_dto=endpoint.request_dto,
+                    response_dto=endpoint.response_dto,
+                    request_fields=list(request_dto.fields) if request_dto else [],
+                    response_fields=list(response_dto.fields) if response_dto else [],
+                    compact_sql_summary=trim_sql_snippet(query.expanded_sql, limit=320),
+                    oracle_19c_notes=_oracle_19c_notes(query),
+                    placeholder_strategy=_placeholder_strategy(query),
+                    implementation_steps=_bff_implementation_steps(spec, endpoint, query),
+                    repository_contract=_repository_contract(spec, endpoint, query),
+                    service_logic=_service_logic(spec, endpoint, query),
+                    evidence_queries=list(endpoint.query_artifacts),
+                    notes=list(dict.fromkeys(endpoint.notes + _bff_notes(query))),
+                )
+            )
+    return artifacts
+
+
+def build_ui_delivery_artifacts(
+    transition_specs: list[TransitionSpecArtifact],
+    business_flows: list[BusinessFlowArtifact],
+) -> tuple[list[UiPseudoArtifact], list[UiReferenceArtifact], list[UiIntegrationArtifact]]:
+    flows_by_module = {item.module_name: item for item in business_flows}
+    pseudo_artifacts: list[UiPseudoArtifact] = []
+    reference_artifacts: list[UiReferenceArtifact] = []
+    integration_artifacts: list[UiIntegrationArtifact] = []
+
+    for spec in transition_specs:
+        flow = flows_by_module.get(spec.module_name)
+        response_fields = [
+            field
+            for dto in spec.dtos
+            if dto.kind == "response"
+            for field in dto.fields
+        ]
+        for page in spec.frontend_pages:
+            interaction_steps = _ui_interaction_steps(page, flow, spec)
+            pseudo = UiPseudoArtifact(
+                module_name=spec.module_name,
+                page_name=page.name,
+                route_path=page.route_path,
+                purpose=page.purpose,
+                layout_sections=_ui_layout_sections(page, response_fields),
+                component_tree=_ui_component_tree(page, response_fields),
+                inputs=list(page.inputs),
+                display_fields=_ui_display_fields(page, response_fields),
+                actions=list(page.actions),
+                api_dependencies=_ui_api_dependencies(page, spec),
+                interaction_steps=interaction_steps,
+                state_model=_ui_state_model(page, response_fields),
+                notes=list(page.notes),
+            )
+            pseudo_artifacts.append(pseudo)
+
+            reference_artifacts.append(
+                UiReferenceArtifact(
+                    module_name=spec.module_name,
+                    page_name=page.name,
+                    route_path=page.route_path,
+                    title=f"{spec.module_name} {page.name} Reference UI",
+                    summary=f"Static HTML reference for page {page.name}, intended as a React visual baseline.",
+                    layout_sections=list(pseudo.layout_sections),
+                    actions=list(pseudo.actions),
+                    api_dependencies=list(pseudo.api_dependencies),
+                    notes=[
+                        "Use this HTML as a reference only; keep final React components aligned with the pseudo UI artifact.",
+                        "Preserve the route and API dependency names when integrating into another transition project.",
+                    ],
+                )
+            )
+
+            integration_artifacts.append(
+                UiIntegrationArtifact(
+                    module_name=spec.module_name,
+                    page_name=page.name,
+                    route_path=page.route_path,
+                    target_feature_dir=f"src/features/{_kebab_case(spec.module_name)}",
+                    suggested_files=_ui_suggested_files(spec.module_name, page),
+                    api_dependencies=_ui_api_dependencies(page, spec),
+                    dto_dependencies=_ui_dto_dependencies(spec),
+                    integration_steps=_ui_integration_steps(spec, page),
+                    acceptance_checks=[
+                        "Register the route before wiring business logic.",
+                        "Create API client types from the listed DTOs before implementing page state.",
+                        "Keep the first slice limited to the listed actions and data dependencies.",
+                    ],
+                    handoff_artifacts=[
+                        f"llm-pack/ui-pseudo/{slugify(spec.module_name)}-{slugify(page.name)}-pseudo-ui.md",
+                        f"llm-pack/ui-reference/{slugify(spec.module_name)}-{slugify(page.name)}-reference-ui.html",
+                        f"llm-pack/bff-sql/{slugify(spec.module_name)}-*.md",
+                    ],
+                    notes=[
+                        f"Recommended first slice: {spec.recommended_first_slice}",
+                        f"Migration strategy: {spec.migration_strategy}",
+                    ],
+                )
+            )
+    return pseudo_artifacts, reference_artifacts, integration_artifacts
+
+
 def package_analysis(
     output: AnalysisOutput,
     max_artifact_chars: int,
@@ -377,6 +508,10 @@ def package_analysis(
     write_json(intermediate_dir / "transition_mapping.json", output.transition_mapping)
     write_json(intermediate_dir / "business_flows.json", output.business_flows)
     write_json(intermediate_dir / "transition_specs.json", output.transition_specs)
+    write_json(intermediate_dir / "bff_sql_artifacts.json", output.bff_sql_artifacts)
+    write_json(intermediate_dir / "ui_pseudo_artifacts.json", output.ui_pseudo_artifacts)
+    write_json(intermediate_dir / "ui_reference_artifacts.json", output.ui_reference_artifacts)
+    write_json(intermediate_dir / "ui_integration_artifacts.json", output.ui_integration_artifacts)
     if output.complexity_report is not None:
         write_json(intermediate_dir / "complexity_report.json", output.complexity_report)
 
@@ -400,6 +535,26 @@ def package_analysis(
                 "transition-specs",
                 intermediate_dir / "transition_specs.json",
                 ["transition", "spec"],
+            ),
+            _manifest_entry(
+                "bff-sql-json",
+                intermediate_dir / "bff_sql_artifacts.json",
+                ["backend-sql", "oracle", "spring"],
+            ),
+            _manifest_entry(
+                "ui-pseudo-json",
+                intermediate_dir / "ui_pseudo_artifacts.json",
+                ["ui", "react", "pseudo"],
+            ),
+            _manifest_entry(
+                "ui-reference-json",
+                intermediate_dir / "ui_reference_artifacts.json",
+                ["ui", "react", "reference"],
+            ),
+            _manifest_entry(
+                "ui-integration-json",
+                intermediate_dir / "ui_integration_artifacts.json",
+                ["ui", "react", "integration"],
             ),
         ]
     )
@@ -491,6 +646,72 @@ def package_analysis(
                 kind="transition-spec",
                 tags=["transition-spec", spec.module_name, spec.readiness_level],
                 recommended_for=[spec.module_name, "transition-spec"],
+            )
+        )
+
+    for artifact in output.bff_sql_artifacts:
+        manifest.extend(
+            _write_chunked_markdown(
+                llm_pack_dir / "bff-sql" / f"{slugify(artifact.module_name)}-{slugify(artifact.query_name)}-bff-sql.md",
+                _build_bff_sql_logic_markdown(artifact),
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="bff-sql",
+                tags=["backend-sql", artifact.module_name, artifact.query_name],
+                recommended_for=[artifact.module_name, artifact.query_name, artifact.endpoint_name, "backend-sql"],
+            )
+        )
+
+    for artifact in output.ui_pseudo_artifacts:
+        manifest.extend(
+            _write_chunked_markdown(
+                llm_pack_dir / "ui-pseudo" / f"{slugify(artifact.module_name)}-{slugify(artifact.page_name)}-pseudo-ui.md",
+                _build_ui_pseudo_markdown(artifact),
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="ui-pseudo",
+                tags=["ui", "react", "pseudo", artifact.module_name, artifact.page_name],
+                recommended_for=[artifact.module_name, artifact.page_name, "ui-pseudo"],
+            )
+        )
+
+    for artifact in output.ui_reference_artifacts:
+        html_path = llm_pack_dir / "ui-reference" / f"{slugify(artifact.module_name)}-{slugify(artifact.page_name)}-reference-ui.html"
+        artifact.html_file_path = html_path.as_posix()
+        write_text(html_path, _build_ui_reference_html(artifact))
+        manifest.append(
+            ArtifactManifestEntry(
+                kind="ui-reference-html",
+                path=html_path.as_posix(),
+                chars=len(html_path.read_text(encoding="utf-8")),
+                estimated_tokens=estimate_tokens(html_path.read_text(encoding="utf-8")),
+                tags=["ui", "react", "reference", artifact.module_name, artifact.page_name],
+                recommended_for=[artifact.module_name, artifact.page_name, "ui-reference"],
+            )
+        )
+        summary_path = llm_pack_dir / "ui-reference" / f"{slugify(artifact.module_name)}-{slugify(artifact.page_name)}-reference-ui.md"
+        manifest.extend(
+            _write_chunked_markdown(
+                summary_path,
+                _build_ui_reference_markdown(artifact),
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="ui-reference",
+                tags=["ui", "react", "reference", artifact.module_name, artifact.page_name],
+                recommended_for=[artifact.module_name, artifact.page_name, "ui-reference"],
+            )
+        )
+
+    for artifact in output.ui_integration_artifacts:
+        manifest.extend(
+            _write_chunked_markdown(
+                llm_pack_dir / "ui-integration" / f"{slugify(artifact.module_name)}-{slugify(artifact.page_name)}-ui-integration.md",
+                _build_ui_integration_markdown(artifact),
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="ui-integration",
+                tags=["ui", "react", "integration", artifact.module_name, artifact.page_name],
+                recommended_for=[artifact.module_name, artifact.page_name, "ui-integration"],
             )
         )
 
@@ -825,8 +1046,338 @@ def _write_chunked_markdown(
                 tags=tags + [f"part-{index:02d}"],
                 recommended_for=recommended_for,
             )
-        )
+    )
     return entries
+
+
+def _oracle_19c_notes(query: ResolvedQueryArtifact) -> list[str]:
+    sql = query.expanded_sql.lower()
+    notes = [
+        "Use named parameter binding so Delphi-style placeholders become explicit Spring repository inputs.",
+    ]
+    if any(token in sql for token in ("nvl(", "decode(", "to_char(", "to_date(", "rownum", "sysdate", "dual")):
+        notes.append("Preserve Oracle-specific scalar functions and row-shaping behavior when moving into the BFF repository.")
+    if "merge " in sql:
+        notes.append("Treat MERGE as a command path and keep the statement terminator when generating Oracle DML.")
+    if query.expanded_sql.strip().lower().startswith("select"):
+        notes.append("Prefer a read-only QueryFacade or repository method that returns DTO rows rather than generic maps.")
+    else:
+        notes.append("Return an execution result contract with affected row counts or status metadata for command SQL.")
+    if len(query.source_trace) > 1:
+        notes.append("The final SQL came from composed SQL XML fragments; keep that trace visible when explaining implementation logic.")
+    return notes
+
+
+def _placeholder_strategy(query: ResolvedQueryArtifact) -> list[str]:
+    if query.unresolved_placeholders:
+        return [
+            f"Treat unresolved placeholder `{item}` as an explicit service-side assumption until the legacy replacement rule is confirmed."
+            for item in query.unresolved_placeholders
+        ] + [
+            "Do not inline guessed values into the Oracle SQL; surface them as missing assumptions in the generated BFF logic."
+        ]
+    if query.discovered_placeholders:
+        return [
+            "Bind every discovered placeholder through a request DTO or an internal service policy object.",
+            "Keep Oracle SQL text stable and move conditional behavior into named parameter assembly.",
+        ]
+    return ["No placeholder expansion remains; the query can be implemented directly as a bounded repository method."]
+
+
+def _bff_implementation_steps(
+    spec: TransitionSpecArtifact,
+    endpoint: SpringEndpointSpec,
+    query: ResolvedQueryArtifact,
+) -> list[str]:
+    steps = [
+        f"Expose `{endpoint.method} {endpoint.path}` from the Spring Boot BFF as the thin web contract for module {spec.module_name}.",
+        f"Validate request fields before calling query `{query.name}` so Oracle parameter binding stays deterministic.",
+        "Translate the request DTO into a named-parameter map rather than rebuilding SQL with ad hoc string concatenation.",
+    ]
+    if query.unresolved_placeholders:
+        steps.append("Pause final SQL assembly until unresolved placeholders are mapped to business rules or service policies.")
+    steps.append(
+        "Execute the expanded SQL through a repository layer, then map the result into the response DTO used by the first migration slice."
+    )
+    return steps
+
+
+def _repository_contract(
+    spec: TransitionSpecArtifact,
+    endpoint: SpringEndpointSpec,
+    query: ResolvedQueryArtifact,
+) -> list[str]:
+    method_name = f"execute{query.name}"
+    if endpoint.method == "GET":
+        return [
+            f"Repository interface: `{query.name}Repository.{method_name}({endpoint.request_dto or 'request'}) -> list[{endpoint.response_dto or 'row'}]`",
+            "Repository implementation should keep Oracle SQL close to the expanded artifact and isolate row mapping logic.",
+        ]
+    return [
+        f"Repository interface: `{query.name}Repository.{method_name}({endpoint.request_dto or 'request'}) -> {endpoint.response_dto or 'result'}`",
+        "Repository implementation should return command metadata instead of leaking JDBC update counts into the controller layer.",
+    ]
+
+
+def _service_logic(
+    spec: TransitionSpecArtifact,
+    endpoint: SpringEndpointSpec,
+    query: ResolvedQueryArtifact,
+) -> list[str]:
+    logic = [
+        f"Service method should align to the recommended first slice: {spec.recommended_first_slice}",
+        "Keep one orchestration method per endpoint so the weak LLM can generate bounded Spring service code from this artifact.",
+    ]
+    if endpoint.method == "GET":
+        logic.append("Normalize filter inputs and call the repository once; keep pagination and enrichment out of the first slice unless explicitly required.")
+    else:
+        logic.append("Wrap the repository call in one application service method and return a result DTO with status plus operator-facing notes.")
+    return logic
+
+
+def _bff_notes(query: ResolvedQueryArtifact) -> list[str]:
+    notes = []
+    if query.parameter_definitions:
+        notes.append(f"Declared parameters: {', '.join(item.name for item in query.parameter_definitions)}")
+    if query.warnings:
+        notes.extend(query.warnings[:3])
+    return notes
+
+
+def _ui_layout_sections(
+    page: ReactPageSpec,
+    response_fields: list[TransitionFieldSpec],
+) -> list[str]:
+    sections = ["PageHeader"]
+    if page.inputs:
+        sections.append("FilterPanel")
+    if page.actions:
+        sections.append("ActionBar")
+    if response_fields or any("grid" in item.lower() for item in page.components):
+        sections.append("ResultGrid")
+    sections.append("FeedbackStrip")
+    return sections
+
+
+def _ui_component_tree(
+    page: ReactPageSpec,
+    response_fields: list[TransitionFieldSpec],
+) -> list[str]:
+    base_name = page.name[:-4] if page.name.endswith("Page") else page.name
+    tree = [f"{base_name}PageShell"]
+    if page.inputs:
+        tree.append(f"{base_name}FilterForm")
+    if page.actions:
+        tree.append(f"{base_name}ActionBar")
+    if response_fields:
+        tree.append(f"{base_name}ResultTable")
+    tree.extend(page.components)
+    return list(dict.fromkeys(tree))
+
+
+def _ui_display_fields(
+    page: ReactPageSpec,
+    response_fields: list[TransitionFieldSpec],
+) -> list[TransitionFieldSpec]:
+    if response_fields:
+        return _dedupe_fields(response_fields[:8])
+    return [
+        TransitionFieldSpec(
+            name="summaryText",
+            data_type="string",
+            required=False,
+            source_evidence=[page.name],
+            notes=["Fallback field because no response DTO columns were inferred."],
+        )
+    ]
+
+
+def _ui_api_dependencies(
+    page: ReactPageSpec,
+    spec: TransitionSpecArtifact,
+) -> list[str]:
+    related = []
+    for endpoint in spec.backend_endpoints:
+        if endpoint.path in page.data_dependencies or endpoint.name in page.data_dependencies:
+            related.append(f"{endpoint.method} {endpoint.path}")
+    if related:
+        return related
+    return [f"{item.method} {item.path}" for item in spec.backend_endpoints[:2]]
+
+
+def _ui_interaction_steps(
+    page: ReactPageSpec,
+    flow: BusinessFlowArtifact | None,
+    spec: TransitionSpecArtifact,
+) -> list[str]:
+    steps = []
+    if flow and flow.steps:
+        for item in flow.steps[:4]:
+            steps.append(f"{item.trigger} -> {item.handler} -> {', '.join(item.queries) or 'no-query-linked'}")
+    if not steps:
+        steps.append(f"Render {page.name}, collect inputs, call the first listed backend dependency, then display the response state.")
+    steps.append(f"Keep the page aligned to the first migration slice: {spec.recommended_first_slice}")
+    return steps
+
+
+def _ui_state_model(
+    page: ReactPageSpec,
+    response_fields: list[TransitionFieldSpec],
+) -> list[str]:
+    state = ["formState", "loading", "errorState"]
+    if response_fields:
+        state.extend(["resultRows", "selectedRow"])
+    if page.actions:
+        state.append("actionStatus")
+    return state
+
+
+def _ui_suggested_files(module_name: str, page: ReactPageSpec) -> list[str]:
+    feature_dir = f"src/features/{_kebab_case(module_name)}"
+    base_name = page.name[:-4] if page.name.endswith("Page") else page.name
+    return [
+        f"{feature_dir}/pages/{page.name}.tsx",
+        f"{feature_dir}/components/{base_name}FilterForm.tsx",
+        f"{feature_dir}/components/{base_name}ResultTable.tsx",
+        f"{feature_dir}/api/{_camel_case(module_name)}Api.ts",
+        f"{feature_dir}/types/{_camel_case(module_name)}Types.ts",
+    ]
+
+
+def _ui_dto_dependencies(spec: TransitionSpecArtifact) -> list[str]:
+    return [item.name for item in spec.dtos[:6]]
+
+
+def _ui_integration_steps(spec: TransitionSpecArtifact, page: ReactPageSpec) -> list[str]:
+    return [
+        f"Register route `{page.route_path}` inside the target React transition project before adding page state.",
+        f"Create typed API helpers for module {spec.module_name} from the listed Spring endpoints and DTOs.",
+        f"Build `{page.name}` from the pseudo UI artifact first, then compare against the HTML reference before wiring interactions.",
+        "Keep the first commit limited to one route, one primary API path, and the minimum filter/result state needed for the first slice.",
+    ]
+
+
+def _build_ui_reference_html(artifact: UiReferenceArtifact) -> str:
+    action_buttons = "".join(
+        f'<button class="action-btn" type="button">{escape(item)}</button>'
+        for item in (artifact.actions or ["Search"])
+    )
+    api_items = "".join(f"<li>{escape(item)}</li>" for item in artifact.api_dependencies)
+    section_cards = "".join(
+        f'<section class="panel"><h2>{escape(item)}</h2><div class="placeholder">Reference block for {escape(item)}</div></section>'
+        for item in artifact.layout_sections
+    )
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{escape(artifact.title)}</title>
+    <style>
+      :root {{
+        --bg: #f5efe6;
+        --ink: #1f2a30;
+        --accent: #1e6d72;
+        --accent-soft: #d9ecec;
+        --panel: rgba(255, 255, 255, 0.88);
+        --line: rgba(31, 42, 48, 0.12);
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, #fff8ef 0, transparent 38%),
+          linear-gradient(160deg, var(--bg), #e3eceb);
+      }}
+      .shell {{
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 28px 18px 44px;
+      }}
+      .hero {{
+        background: linear-gradient(135deg, var(--accent), #27465a);
+        color: #fff;
+        padding: 24px;
+        border-radius: 24px;
+        box-shadow: 0 18px 40px rgba(31, 42, 48, 0.18);
+      }}
+      .hero p {{ max-width: 60ch; line-height: 1.45; }}
+      .meta {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 14px;
+      }}
+      .chip {{
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.14);
+      }}
+      .actions {{
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 22px 0;
+      }}
+      .action-btn {{
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 18px;
+        background: var(--accent-soft);
+        color: var(--ink);
+        font-weight: 700;
+      }}
+      .grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+      }}
+      .panel {{
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 18px;
+        min-height: 180px;
+        box-shadow: 0 10px 20px rgba(31, 42, 48, 0.06);
+      }}
+      .placeholder {{
+        margin-top: 12px;
+        border: 1px dashed var(--line);
+        border-radius: 14px;
+        padding: 18px;
+        background: rgba(217, 236, 236, 0.35);
+      }}
+      ul {{
+        margin: 10px 0 0;
+        padding-left: 18px;
+      }}
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <h1>{escape(artifact.title)}</h1>
+        <p>{escape(artifact.summary)}</p>
+        <div class="meta">
+          <span class="chip">Route {escape(artifact.route_path)}</span>
+          <span class="chip">Module {escape(artifact.module_name)}</span>
+          <span class="chip">Page {escape(artifact.page_name)}</span>
+        </div>
+      </header>
+      <div class="actions">{action_buttons}</div>
+      <section class="grid">
+        {section_cards}
+      </section>
+      <section class="panel" style="margin-top: 16px;">
+        <h2>API Dependencies</h2>
+        <ul>{api_items or '<li>None</li>'}</ul>
+      </section>
+    </main>
+  </body>
+</html>
+"""
 
 
 def _build_project_summary(output: AnalysisOutput) -> str:
@@ -851,6 +1402,10 @@ def _build_project_summary(output: AnalysisOutput) -> str:
 - Resolved queries: {len(output.resolved_queries)}
 - Business flows: {len(output.business_flows)}
 - Transition specs: {len(output.transition_specs)}
+- BFF SQL artifacts: {len(output.bff_sql_artifacts)}
+- UI pseudo artifacts: {len(output.ui_pseudo_artifacts)}
+- UI reference artifacts: {len(output.ui_reference_artifacts)}
+- UI integration artifacts: {len(output.ui_integration_artifacts)}
 - Diagnostics: {len(output.diagnostics)} total, {len(severe)} severe
 
 ## Workspace Coverage
@@ -868,8 +1423,9 @@ def _build_project_summary(output: AnalysisOutput) -> str:
 1. `project-summary.md`
 2. `load-plan.json`
 3. The target module dossier, transition spec, and business flow artifact
-4. Only the query artifacts listed by that module bundle
-5. `diagnostics.md` and `prompt-recipes.md` for unresolved context
+4. For backend work, load the module BFF SQL bundle and only the linked query artifacts
+5. For frontend work, load the UI pseudo bundle, then the HTML reference and UI integration bundle
+6. `diagnostics.md` and `prompt-recipes.md` for unresolved context
 
 ## Candidate Migration Modules
 
@@ -1020,6 +1576,172 @@ def _build_transition_spec_markdown(spec: TransitionSpecArtifact) -> str:
         ]
     )
     return "\n".join(parts)
+
+
+def _build_bff_sql_logic_markdown(artifact: BffSqlLogicArtifact) -> str:
+    return f"""# BFF SQL Logic: {artifact.module_name} / {artifact.endpoint_name}
+
+## API Contract
+
+- Method: `{artifact.http_method}`
+- Route: `{artifact.route_path}`
+- Query: `{artifact.query_name}`
+- Purpose: {artifact.purpose}
+- Request DTO: {artifact.request_dto or "None"}
+- Response DTO: {artifact.response_dto or "None"}
+
+## Compact SQL Summary
+
+```sql
+{artifact.compact_sql_summary}
+```
+
+## Oracle 19c Notes
+
+{_bullet_lines(artifact.oracle_19c_notes)}
+
+## Request Fields
+
+{_field_bullets(artifact.request_fields)}
+
+## Response Fields
+
+{_field_bullets(artifact.response_fields)}
+
+## Placeholder Strategy
+
+{_bullet_lines(artifact.placeholder_strategy)}
+
+## Implementation Steps
+
+{_bullet_lines(artifact.implementation_steps)}
+
+## Repository Contract
+
+{_bullet_lines(artifact.repository_contract)}
+
+## Service Logic
+
+{_bullet_lines(artifact.service_logic)}
+
+## Evidence Queries
+
+{_bullet_lines(artifact.evidence_queries)}
+
+## Notes
+
+{_bullet_lines(artifact.notes)}
+"""
+
+
+def _build_ui_pseudo_markdown(artifact: UiPseudoArtifact) -> str:
+    return f"""# UI Pseudo: {artifact.module_name} / {artifact.page_name}
+
+## Page Contract
+
+- Route: `{artifact.route_path}`
+- Purpose: {artifact.purpose}
+
+## Layout Sections
+
+{_bullet_lines(artifact.layout_sections)}
+
+## Component Tree
+
+{_bullet_lines(artifact.component_tree)}
+
+## Inputs
+
+{_field_bullets(artifact.inputs)}
+
+## Display Fields
+
+{_field_bullets(artifact.display_fields)}
+
+## Actions
+
+{_bullet_lines(artifact.actions)}
+
+## API Dependencies
+
+{_bullet_lines(artifact.api_dependencies)}
+
+## Interaction Steps
+
+{_bullet_lines(artifact.interaction_steps)}
+
+## State Model
+
+{_bullet_lines(artifact.state_model)}
+
+## Notes
+
+{_bullet_lines(artifact.notes)}
+"""
+
+
+def _build_ui_reference_markdown(artifact: UiReferenceArtifact) -> str:
+    return f"""# UI Reference: {artifact.module_name} / {artifact.page_name}
+
+- Route: `{artifact.route_path}`
+- Title: {artifact.title}
+- HTML file: `{artifact.html_file_path or 'Pending'}`
+- Summary: {artifact.summary}
+
+## Layout Sections
+
+{_bullet_lines(artifact.layout_sections)}
+
+## Actions
+
+{_bullet_lines(artifact.actions)}
+
+## API Dependencies
+
+{_bullet_lines(artifact.api_dependencies)}
+
+## Notes
+
+{_bullet_lines(artifact.notes)}
+"""
+
+
+def _build_ui_integration_markdown(artifact: UiIntegrationArtifact) -> str:
+    return f"""# UI Integration: {artifact.module_name} / {artifact.page_name}
+
+## Target Placement
+
+- Route: `{artifact.route_path}`
+- Feature directory: `{artifact.target_feature_dir}`
+
+## Suggested Files
+
+{_bullet_lines(artifact.suggested_files)}
+
+## API Dependencies
+
+{_bullet_lines(artifact.api_dependencies)}
+
+## DTO Dependencies
+
+{_bullet_lines(artifact.dto_dependencies)}
+
+## Integration Steps
+
+{_bullet_lines(artifact.integration_steps)}
+
+## Acceptance Checks
+
+{_bullet_lines(artifact.acceptance_checks)}
+
+## Handoff Artifacts
+
+{_bullet_lines(artifact.handoff_artifacts)}
+
+## Notes
+
+{_bullet_lines(artifact.notes)}
+"""
 
 
 def _build_business_flow_artifact(flow: BusinessFlowArtifact) -> str:
@@ -1192,7 +1914,11 @@ def _build_load_bundles(
         relevant = [
             entry
             for entry in manifest
-            if module.name in entry.recommended_for or "project-overview" in entry.recommended_for
+            if (
+                module.name in entry.recommended_for
+                and entry.kind in {"module-dossier", "business-flow", "transition-spec"}
+            )
+            or "project-overview" in entry.recommended_for
         ]
         artifact_paths = [entry.path for entry in relevant]
         estimated = sum(entry.estimated_tokens for entry in relevant)
@@ -1213,6 +1939,69 @@ def _build_load_bundles(
                 ],
             )
         )
+        backend_relevant = [
+            entry
+            for entry in manifest
+            if module.name in entry.recommended_for
+            and entry.kind in {"transition-spec", "business-flow", "bff-sql", "query-artifact"}
+        ]
+        bundles.append(
+            LoadBundleArtifact(
+                name=f"{module.name}BffSql",
+                category="backend-sql",
+                artifact_paths=[entry.path for entry in backend_relevant],
+                estimated_tokens=sum(entry.estimated_tokens for entry in backend_relevant),
+                recommended_prompt=(
+                    f"Load the {module.name} backend SQL bundle, then generate one Spring Boot BFF endpoint or repository implementation at a time."
+                ),
+                notes=[
+                    "Designed for weak models: keep one endpoint per prompt.",
+                    "Use the compact BFF SQL artifact before opening the full query artifact.",
+                ],
+            )
+        )
+        ui_relevant = [
+            entry
+            for entry in manifest
+            if module.name in entry.recommended_for
+            and entry.kind in {"transition-spec", "business-flow", "ui-pseudo", "ui-reference", "ui-reference-html"}
+        ]
+        bundles.append(
+            LoadBundleArtifact(
+                name=f"{module.name}Ui",
+                category="ui",
+                artifact_paths=[entry.path for entry in ui_relevant],
+                estimated_tokens=sum(entry.estimated_tokens for entry in ui_relevant),
+                recommended_prompt=(
+                    f"Load the {module.name} UI bundle, generate the React pseudo UI first, then derive the HTML or React reference UI."
+                ),
+                notes=[
+                    "Designed for weak models: keep one page per prompt.",
+                    "Use the HTML reference only after reading the pseudo UI artifact.",
+                ],
+            )
+        )
+        integration_relevant = [
+            entry
+            for entry in manifest
+            if module.name in entry.recommended_for
+            and entry.kind in {"transition-spec", "ui-pseudo", "ui-reference", "ui-reference-html", "ui-integration", "bff-sql"}
+        ]
+        bundles.append(
+            LoadBundleArtifact(
+                name=f"{module.name}UiIntegration",
+                category="ui-integration",
+                artifact_paths=[entry.path for entry in integration_relevant],
+                estimated_tokens=sum(entry.estimated_tokens for entry in integration_relevant),
+                recommended_prompt=(
+                    f"Load the {module.name} UI integration bundle when merging the generated UI slice into another React transition project."
+                ),
+                notes=[
+                    "Keeps route, API, and file-structure guidance together.",
+                    "Load only the target page artifacts plus the linked backend SQL artifact.",
+                ],
+            )
+        )
     return bundles
 
 
@@ -1226,17 +2015,40 @@ def _build_load_plan(
         if bundle.category == "module"
     ]
     module_priority.sort(key=lambda item: item.estimated_tokens)
+    backend_priority = [
+        bundle
+        for bundle in bundles
+        if bundle.category == "backend-sql"
+    ]
+    backend_priority.sort(key=lambda item: item.estimated_tokens)
+    ui_priority = [
+        bundle
+        for bundle in bundles
+        if bundle.category == "ui"
+    ]
+    ui_priority.sort(key=lambda item: item.estimated_tokens)
+    ui_integration_priority = [
+        bundle
+        for bundle in bundles
+        if bundle.category == "ui-integration"
+    ]
+    ui_integration_priority.sort(key=lambda item: item.estimated_tokens)
     return {
         "overview_bundle": next(
             (bundle.name for bundle in bundles if bundle.category == "overview"),
             None,
         ),
         "recommended_module_order": [bundle.name for bundle in module_priority],
+        "recommended_backend_sql_order": [bundle.name for bundle in backend_priority],
+        "recommended_ui_order": [bundle.name for bundle in ui_priority],
+        "recommended_ui_integration_order": [bundle.name for bundle in ui_integration_priority],
         "bundles": bundles,
         "cross_cutting_concerns": output.transition_mapping.cross_cutting_concerns,
         "notes": [
             "Prefer the smallest module bundle that still covers the target business flow.",
-            "Use the transition spec before asking the LLM to expand into detailed React or Spring implementation tasks.",
+            "Use the backend-sql bundles to generate one Spring Boot BFF Oracle 19c implementation unit at a time.",
+            "Use the UI bundles to generate one pseudo UI or reference UI page at a time.",
+            "Use the ui-integration bundles only when moving the generated UI into another React transition project.",
             "Only add diagnostics when the current artifacts leave a concrete unanswered question.",
         ],
     }
