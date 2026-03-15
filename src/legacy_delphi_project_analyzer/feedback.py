@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from legacy_delphi_project_analyzer.knowledge import ALLOWED_RULE_KEYS
+from legacy_delphi_project_analyzer.models import PromptEffectivenessItem, PromptEffectivenessReport
 from legacy_delphi_project_analyzer.utils import ensure_directory, write_json, write_text
 
 
@@ -73,6 +74,8 @@ def ingest_feedback(analysis_dir: Path, feedback_path: Path) -> dict[str, Any]:
     write_json(knowledge_dir / "accepted_rules.json", accepted_rules)
     write_json(knowledge_dir / "feedback-log.json", feedback_log)
     write_json(knowledge_dir / "rejected_rules.json", rejected_log)
+    prompt_effectiveness = build_prompt_effectiveness_report(prompt_index.values(), feedback_log)
+    write_json(knowledge_dir / "prompt-effectiveness.json", prompt_effectiveness)
     write_text(
         knowledge_dir / "feedback-insights.md",
         _build_feedback_insights(
@@ -83,6 +86,10 @@ def ingest_feedback(analysis_dir: Path, feedback_path: Path) -> dict[str, Any]:
             follow_up_count=follow_up_count,
             fallback_count=fallback_count,
         ),
+    )
+    write_text(
+        knowledge_dir / "prompt-effectiveness.md",
+        render_prompt_effectiveness_markdown(prompt_effectiveness),
     )
     return {
         "analysis_dir": analysis_dir.as_posix(),
@@ -182,6 +189,150 @@ def _infer_rules(prompt_meta: dict[str, Any], response: Any) -> dict[str, Any]:
     return rules
 
 
+def build_prompt_effectiveness_report(
+    prompt_sources: Any,
+    feedback_log: list[dict[str, Any]],
+) -> PromptEffectivenessReport:
+    metadata = _build_prompt_metadata(prompt_sources)
+    items_by_name: dict[str, PromptEffectivenessItem] = {}
+
+    for name, item in metadata.items():
+        items_by_name[name] = PromptEffectivenessItem(
+            prompt_name=name,
+            goal=item.get("goal") or "unknown",
+            subject_name=item.get("subject_name"),
+            target_model=item.get("target_model"),
+            notes=["No feedback recorded yet."],
+        )
+
+    for entry in feedback_log:
+        if not isinstance(entry, dict):
+            continue
+        prompt_name = entry.get("prompt_name")
+        if not isinstance(prompt_name, str) or not prompt_name:
+            continue
+        item = items_by_name.get(prompt_name)
+        if item is None:
+            item = PromptEffectivenessItem(
+                prompt_name=prompt_name,
+                goal=str(entry.get("goal") or "unknown"),
+                subject_name=entry.get("subject_name") if isinstance(entry.get("subject_name"), str) else None,
+                target_model=entry.get("target_model") if isinstance(entry.get("target_model"), str) else None,
+            )
+            items_by_name[prompt_name] = item
+        item.attempts += 1
+        status = str(entry.get("status") or "needs_follow_up")
+        if status == "accepted":
+            item.accepted += 1
+        elif status == "rejected":
+            item.rejected += 1
+        else:
+            item.needs_follow_up += 1
+        if entry.get("used_fallback"):
+            item.fallback_uses += 1
+        item.success_rate = round(item.accepted / item.attempts, 3) if item.attempts else 0.0
+        item.notes = []
+
+    prompt_items = list(items_by_name.values())
+    goal_summary: dict[str, dict[str, int | float]] = {}
+    for item in prompt_items:
+        goal_metrics = goal_summary.setdefault(
+            item.goal,
+            {
+                "attempts": 0,
+                "accepted": 0,
+                "rejected": 0,
+                "needs_follow_up": 0,
+                "fallback_uses": 0,
+                "success_rate": 0.0,
+            },
+        )
+        goal_metrics["attempts"] += item.attempts
+        goal_metrics["accepted"] += item.accepted
+        goal_metrics["rejected"] += item.rejected
+        goal_metrics["needs_follow_up"] += item.needs_follow_up
+        goal_metrics["fallback_uses"] += item.fallback_uses
+    for goal, metrics in goal_summary.items():
+        attempts = int(metrics["attempts"])
+        metrics["success_rate"] = round(int(metrics["accepted"]) / attempts, 3) if attempts else 0.0
+
+    attempted_items = [item for item in prompt_items if item.attempts]
+    top_successful = sorted(
+        attempted_items,
+        key=lambda item: (item.success_rate, item.accepted, -item.rejected, item.prompt_name.lower()),
+        reverse=True,
+    )[:5]
+    top_failing = sorted(
+        attempted_items,
+        key=lambda item: (-item.rejected, -item.needs_follow_up, item.success_rate, item.prompt_name.lower()),
+    )[:5]
+    management_summary = _build_management_summary(prompt_items, goal_summary, feedback_log)
+    accepted_entries = sum(1 for item in feedback_log if item.get("status") == "accepted")
+    rejected_entries = sum(1 for item in feedback_log if item.get("status") == "rejected")
+    follow_up_entries = sum(1 for item in feedback_log if item.get("status") == "needs_follow_up")
+    fallback_entries = sum(1 for item in feedback_log if item.get("used_fallback"))
+    return PromptEffectivenessReport(
+        total_feedback_entries=len(feedback_log),
+        accepted_entries=accepted_entries,
+        rejected_entries=rejected_entries,
+        follow_up_entries=follow_up_entries,
+        fallback_entries=fallback_entries,
+        top_successful_prompts=top_successful,
+        top_failing_prompts=top_failing,
+        goal_summary=goal_summary,
+        management_summary=management_summary,
+    )
+
+
+def render_prompt_effectiveness_markdown(report: PromptEffectivenessReport) -> str:
+    lines = [
+        "# Prompt Effectiveness",
+        "",
+        "## Summary",
+        "",
+        f"- Total feedback entries: {report.total_feedback_entries}",
+        f"- Accepted: {report.accepted_entries}",
+        f"- Rejected: {report.rejected_entries}",
+        f"- Needs follow-up: {report.follow_up_entries}",
+        f"- Fallback uses: {report.fallback_entries}",
+        "",
+        "## Management Summary",
+        "",
+    ]
+    if report.management_summary:
+        lines.extend(f"- {item}" for item in report.management_summary)
+    else:
+        lines.append("- No prompt feedback has been recorded yet.")
+    lines.extend(["", "## Top Successful Prompts", ""])
+    if report.top_successful_prompts:
+        lines.extend(
+            f"- {item.prompt_name}: success_rate={item.success_rate:.3f}, accepted={item.accepted}, attempts={item.attempts}"
+            for item in report.top_successful_prompts
+        )
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Top Failing Prompts", ""])
+    if report.top_failing_prompts:
+        lines.extend(
+            f"- {item.prompt_name}: rejected={item.rejected}, follow_up={item.needs_follow_up}, success_rate={item.success_rate:.3f}"
+            for item in report.top_failing_prompts
+        )
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Goal Summary", ""])
+    if report.goal_summary:
+        for goal, metrics in sorted(report.goal_summary.items()):
+            lines.append(
+                f"- {goal}: attempts={metrics['attempts']}, accepted={metrics['accepted']}, "
+                f"rejected={metrics['rejected']}, follow_up={metrics['needs_follow_up']}, "
+                f"fallback={metrics['fallback_uses']}, success_rate={metrics['success_rate']}"
+            )
+    else:
+        lines.append("- None")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _build_feedback_insights(
     *,
     feedback_log: list[dict[str, Any]],
@@ -220,6 +371,67 @@ def _build_feedback_insights(
         lines.append("- No feedback entries have been recorded.")
     lines.append("")
     return "\n".join(lines)
+
+
+def _build_prompt_metadata(prompt_sources: Any) -> dict[str, dict[str, Any]]:
+    metadata: dict[str, dict[str, Any]] = {}
+    if isinstance(prompt_sources, dict):
+        iterable = prompt_sources.values()
+    else:
+        iterable = prompt_sources
+    for item in iterable:
+        if isinstance(item, dict):
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            metadata[name] = {
+                "goal": item.get("goal"),
+                "subject_name": item.get("subject_name"),
+                "target_model": item.get("target_model"),
+            }
+            continue
+        name = getattr(item, "name", None)
+        if not isinstance(name, str) or not name:
+            continue
+        metadata[name] = {
+            "goal": getattr(item, "goal", None),
+            "subject_name": getattr(item, "subject_name", None),
+            "target_model": getattr(item, "target_model", None),
+        }
+    return metadata
+
+
+def _build_management_summary(
+    prompt_items: list[PromptEffectivenessItem],
+    goal_summary: dict[str, dict[str, int | float]],
+    feedback_log: list[dict[str, Any]],
+) -> list[str]:
+    summary = []
+    if not feedback_log:
+        return ["No feedback has been ingested yet, so prompt effectiveness is still unmeasured."]
+    accepted = sum(1 for item in feedback_log if item.get("status") == "accepted")
+    summary.append(f"Accepted prompt outcomes currently total {accepted} out of {len(feedback_log)} recorded attempts.")
+    ranked_goals = [
+        (goal, metrics)
+        for goal, metrics in goal_summary.items()
+        if int(metrics["attempts"]) > 0
+    ]
+    if ranked_goals:
+        best_goal, best_metrics = max(ranked_goals, key=lambda pair: float(pair[1]["success_rate"]))
+        worst_goal, worst_metrics = min(ranked_goals, key=lambda pair: float(pair[1]["success_rate"]))
+        summary.append(
+            f"Best-performing prompt goal is {best_goal} with success rate {float(best_metrics['success_rate']):.3f}."
+        )
+        summary.append(
+            f"Lowest-performing prompt goal is {worst_goal} with success rate {float(worst_metrics['success_rate']):.3f}."
+        )
+    untested = sum(1 for item in prompt_items if item.attempts == 0)
+    if untested:
+        summary.append(f"{untested} prompt pack(s) still have no recorded feedback and remain unverified.")
+    fallback_uses = sum(1 for item in feedback_log if item.get("used_fallback"))
+    if fallback_uses:
+        summary.append(f"Fallback prompts were needed {fallback_uses} time(s), which indicates prompts that should be tightened.")
+    return summary
 
 
 def _load_json(path: Path, default: Any) -> Any:

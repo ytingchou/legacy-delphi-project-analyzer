@@ -326,6 +326,7 @@ class AnalysisOutput:
     failure_triage: list[FailureTriageArtifact] = field(default_factory=list)
     complexity_report: ComplexityReport | None = None
     prompt_effectiveness_report: PromptEffectivenessReport | None = None
+    feedback_log: list[dict[str, Any]] = field(default_factory=list)
     diagnostics: list[DiagnosticRecord] = field(default_factory=list)
     manifest: list[ArtifactManifestEntry] = field(default_factory=list)
     output_dir: str | None = None

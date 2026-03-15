@@ -17,6 +17,10 @@ from legacy_delphi_project_analyzer.models import (
     ResolvedQueryArtifact,
     TransitionMappingArtifact,
 )
+from legacy_delphi_project_analyzer.feedback import (
+    build_prompt_effectiveness_report,
+    render_prompt_effectiveness_markdown,
+)
 from legacy_delphi_project_analyzer.prompting import (
     build_repro_bundle_payload,
     build_failure_triage,
@@ -614,6 +618,30 @@ def package_analysis(
                 ["failure-triage", triage.issue_code, triage.severity],
             )
         )
+
+    output.prompt_effectiveness_report = build_prompt_effectiveness_report(
+        output.prompt_packs,
+        output.feedback_log,
+    )
+    write_json(knowledge_dir / "prompt-effectiveness.json", output.prompt_effectiveness_report)
+    write_text(
+        knowledge_dir / "prompt-effectiveness.md",
+        render_prompt_effectiveness_markdown(output.prompt_effectiveness_report),
+    )
+    manifest.append(
+        _manifest_entry(
+            "knowledge",
+            knowledge_dir / "prompt-effectiveness.json",
+            ["knowledge", "prompt-effectiveness"],
+        )
+    )
+    manifest.append(
+        _manifest_entry(
+            "knowledge",
+            knowledge_dir / "prompt-effectiveness.md",
+            ["knowledge", "prompt-effectiveness", "insights"],
+        )
+    )
 
     if output.complexity_report is not None:
         boss_summary = build_boss_summary_markdown(output)

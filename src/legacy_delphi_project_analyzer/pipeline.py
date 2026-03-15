@@ -58,6 +58,7 @@ def run_analysis(
 
     inventory = discover_project_files(project_root, knowledge, workspace)
     output = AnalysisOutput(inventory=inventory, output_dir=output_dir.as_posix())
+    output.feedback_log = knowledge.get_feedback_log()
     output.diagnostics.extend(bootstrap_diagnostics)
     output.diagnostics.extend(workspace.diagnostics)
     output.diagnostics.extend(knowledge_diagnostics)

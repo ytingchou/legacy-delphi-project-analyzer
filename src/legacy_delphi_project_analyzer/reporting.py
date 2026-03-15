@@ -93,6 +93,12 @@ def build_boss_summary_markdown(output: AnalysisOutput) -> str:
     if report is None:
         raise ValueError("output.complexity_report must be set before building the boss summary.")
     top_modules = report.module_scores[:5]
+    prompt_report = output.prompt_effectiveness_report
+    prompt_summary = (
+        _bullet_lines(prompt_report.management_summary)
+        if prompt_report is not None
+        else "- No prompt feedback has been imported yet."
+    )
     return f"""# Executive Summary
 
 ## Project Complexity
@@ -116,6 +122,10 @@ def build_boss_summary_markdown(output: AnalysisOutput) -> str:
 ## Recommended Migration Strategy
 
 {_bullet_lines(report.migration_recommendations)}
+
+## Prompt Effectiveness
+
+{prompt_summary}
 """
 
 
@@ -129,6 +139,7 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         "load_bundles": output.load_bundles,
         "prompt_packs": output.prompt_packs,
         "failure_triage": output.failure_triage,
+        "prompt_effectiveness_report": output.prompt_effectiveness_report,
         "diagnostic_count": len(output.diagnostics),
     }
     data_json = json.dumps(to_jsonable(payload), ensure_ascii=False)
@@ -140,6 +151,15 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         ("External Roots", str(len(output.inventory.external_roots)), "Shared legacy repos"),
         ("Missing Paths", str(len(output.inventory.missing_search_paths)), "Workspace gaps"),
         ("Prompt Packs", str(len(output.prompt_packs)), "Model-ready tasks"),
+        (
+            "Prompt Success",
+            (
+                f"{int(round((output.prompt_effectiveness_report.accepted_entries / max(1, output.prompt_effectiveness_report.total_feedback_entries)) * 100))}%"
+                if output.prompt_effectiveness_report and output.prompt_effectiveness_report.total_feedback_entries
+                else "N/A"
+            ),
+            "Accepted prompt outcomes",
+        ),
         ("Failure Cases", str(len(output.failure_triage)), "Minimal repro bundles"),
         ("Diagnostics", str(report.total_diagnostics), "Warnings + errors"),
         ("Unresolved", str(report.total_unresolved_placeholders), "Legacy placeholders"),
@@ -179,6 +199,32 @@ def build_web_report_html(output: AnalysisOutput) -> str:
     leadership_points = "\n".join(
         f"<li>{escape(item)}</li>" for item in report.executive_summary
     )
+    prompt_effectiveness = output.prompt_effectiveness_report
+    prompt_rows = ""
+    prompt_summary_markup = "<li>No prompt feedback has been imported yet.</li>"
+    if prompt_effectiveness is not None:
+        prompt_rows = "\n".join(
+            f"""
+            <tr>
+              <td>{escape(item.prompt_name)}</td>
+              <td>{escape(item.goal)}</td>
+              <td>{item.attempts}</td>
+              <td>{item.accepted}</td>
+              <td>{item.rejected}</td>
+              <td>{item.needs_follow_up}</td>
+              <td>{item.fallback_uses}</td>
+              <td>{item.success_rate:.3f}</td>
+            </tr>
+            """
+            for item in prompt_effectiveness.top_failing_prompts + [
+                item
+                for item in prompt_effectiveness.top_successful_prompts
+                if item.prompt_name not in {row.prompt_name for row in prompt_effectiveness.top_failing_prompts}
+            ]
+        )
+        prompt_summary_markup = "\n".join(
+            f"<li>{escape(item)}</li>" for item in prompt_effectiveness.management_summary
+        ) or "<li>No prompt feedback has been imported yet.</li>"
     return f"""<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -373,6 +419,21 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         </article>
       </section>
 
+      <section class="grid">
+        <article class="panel">
+          <h2>Prompt Effectiveness Summary</h2>
+          <ul>{prompt_summary_markup}</ul>
+        </article>
+        <article class="panel">
+          <h2>Prompt Closure Health</h2>
+          <ul>
+            <li>Total prompt packs: {len(output.prompt_packs)}</li>
+            <li>Feedback entries: {prompt_effectiveness.total_feedback_entries if prompt_effectiveness else 0}</li>
+            <li>Fallback uses: {prompt_effectiveness.fallback_entries if prompt_effectiveness else 0}</li>
+          </ul>
+        </article>
+      </section>
+
       <section class="panel stack">
         <div>
           <h2>Module Complexity</h2>
@@ -403,6 +464,31 @@ def build_web_report_html(output: AnalysisOutput) -> str:
           <h2>LLM Work Bundles</h2>
           <div class="bundle-grid">
             {bundle_cards}
+          </div>
+        </div>
+      </section>
+
+      <section class="panel stack">
+        <div>
+          <h2>Prompt Effectiveness</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Prompt</th>
+                  <th>Goal</th>
+                  <th>Attempts</th>
+                  <th>Accepted</th>
+                  <th>Rejected</th>
+                  <th>Follow-up</th>
+                  <th>Fallback</th>
+                  <th>Success Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prompt_rows or '<tr><td colspan="8">No prompt feedback has been imported yet.</td></tr>'}
+              </tbody>
+            </table>
           </div>
         </div>
       </section>

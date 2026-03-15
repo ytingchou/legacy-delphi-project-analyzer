@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.0
+
+- Added prompt effectiveness scoring from imported feedback, including per-prompt and per-goal success metrics.
+- Added `prompt-effectiveness.json` and `prompt-effectiveness.md` outputs for management reporting.
+- Added prompt effectiveness sections to the boss summary and static web dashboard.
+- Added regression coverage to ensure imported feedback appears in later analysis reports.
+
 ## v0.8.0
 
 - Added `ingest-feedback` so accepted or rejected LLM answers can be imported back into the analyzer.

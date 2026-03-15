@@ -49,12 +49,31 @@ class FeedbackLearningTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
+            prompt_effectiveness = json.loads(
+                (Path(output.output_dir) / "knowledge" / "prompt-effectiveness.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             self.assertIn("OrderLookup", accepted_rules["placeholder_notes"])
             self.assertIn("fPriceCheckRule", accepted_rules["placeholder_notes"]["OrderLookup"])
             self.assertEqual(
                 accepted_rules["query_hints"]["OrderLookup"],
                 "Looks up orders before price-check approval.",
             )
+            self.assertEqual(prompt_effectiveness["accepted_entries"], 1)
+
+            rerun = run_analysis(
+                project_root=FIXTURE_ROOT,
+                output_dir=Path(tmpdir) / "artifacts",
+                phases=["all"],
+            )
+            self.assertIsNotNone(rerun.prompt_effectiveness_report)
+            assert rerun.prompt_effectiveness_report is not None
+            self.assertEqual(rerun.prompt_effectiveness_report.accepted_entries, 1)
+            report_html = (Path(rerun.output_dir) / "report" / "index.html").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("Prompt Effectiveness", report_html)
 
     def test_feedback_learning_unblocks_workspace_resolution_on_next_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
