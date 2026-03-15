@@ -134,6 +134,9 @@ def build_boss_summary_markdown(output: AnalysisOutput) -> str:
 - Ready modules: {len(ready_specs)}
 - Blocked modules: {len(blocked_specs)}
 - Transition specs generated: {len(output.transition_specs)}
+- Backend SQL handoff artifacts: {len(output.bff_sql_artifacts)}
+- UI pseudo/reference artifacts: {len(output.ui_pseudo_artifacts)}/{len(output.ui_reference_artifacts)}
+- UI integration artifacts: {len(output.ui_integration_artifacts)}
 
 ## First Slices
 
@@ -157,6 +160,10 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         "complexity_report": report,
         "transition_mapping": output.transition_mapping,
         "transition_specs": output.transition_specs,
+        "bff_sql_artifacts": output.bff_sql_artifacts,
+        "ui_pseudo_artifacts": output.ui_pseudo_artifacts,
+        "ui_reference_artifacts": output.ui_reference_artifacts,
+        "ui_integration_artifacts": output.ui_integration_artifacts,
         "load_bundles": output.load_bundles,
         "prompt_packs": output.prompt_packs,
         "failure_triage": output.failure_triage,
@@ -178,6 +185,9 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         ("External Roots", str(len(output.inventory.external_roots)), "Shared legacy repos"),
         ("Missing Paths", str(len(output.inventory.missing_search_paths)), "Workspace gaps"),
         ("Prompt Packs", str(len(output.prompt_packs)), "Model-ready tasks"),
+        ("BFF SQL", str(len(output.bff_sql_artifacts)), "Oracle handoff slices"),
+        ("Pseudo UI", str(len(output.ui_pseudo_artifacts)), "Page-level UI plans"),
+        ("UI Integration", str(len(output.ui_integration_artifacts)), "React project handoff"),
         (
             "Prompt Success",
             (
@@ -237,6 +247,31 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         </tr>
         """
         for item in sorted(output.transition_specs, key=lambda value: value.readiness_score, reverse=True)
+    )
+    bff_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.module_name)}</td>
+          <td>{escape(item.endpoint_name)}</td>
+          <td>{escape(item.query_name)}</td>
+          <td>{escape(f"{item.http_method} {item.route_path}")}</td>
+          <td>{escape(item.request_dto or 'None')}</td>
+          <td>{escape(item.response_dto or 'None')}</td>
+        </tr>
+        """
+        for item in output.bff_sql_artifacts
+    )
+    ui_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.module_name)}</td>
+          <td>{escape(item.page_name)}</td>
+          <td>{escape(item.route_path)}</td>
+          <td>{escape(', '.join(item.api_dependencies) or 'None')}</td>
+          <td>{escape(item.target_feature_dir)}</td>
+        </tr>
+        """
+        for item in output.ui_integration_artifacts
     )
     prompt_effectiveness = output.prompt_effectiveness_report
     prompt_rows = ""
@@ -518,6 +553,48 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             </table>
           </div>
         </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Backend SQL Handoff</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Endpoint</th>
+                  <th>Query</th>
+                  <th>Route</th>
+                  <th>Request DTO</th>
+                  <th>Response DTO</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bff_rows or '<tr><td colspan="6">No backend SQL handoff artifacts generated yet.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>UI Integration Handoff</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Page</th>
+                  <th>Route</th>
+                  <th>APIs</th>
+                  <th>Feature Dir</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ui_rows or '<tr><td colspan="5">No UI integration artifacts generated yet.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section class="panel stack">

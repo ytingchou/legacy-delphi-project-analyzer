@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4.0
+
+- Extended the boss summary, runtime handoff manifest, and static web dashboard with backend SQL and UI handoff visibility.
+- Added completeness tracking for BFF SQL, UI pseudo, UI reference, and UI integration artifacts.
+- Expanded phase definitions so transition and handoff phases now explicitly require weak-model-ready backend/UI artifact families.
+- Added regression coverage for runtime completeness and dashboard rendering of the new handoff artifact families.
+
 ## v1.3.0
 
 - Added compact BFF SQL logic artifacts under `llm-pack/bff-sql/` plus `intermediate/bff_sql_artifacts.json`.

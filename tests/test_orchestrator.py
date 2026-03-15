@@ -45,6 +45,12 @@ class OrchestratorTests(unittest.TestCase):
             self.assertIsNotNone(completeness)
             assert completeness is not None
             self.assertIn("transition_specs", completeness.items)
+            self.assertIn("bff_sql_artifacts", completeness.items)
+            self.assertIn("ui_pseudo_artifacts", completeness.items)
+            self.assertIn("ui_reference_artifacts", completeness.items)
+            self.assertIn("ui_integration_artifacts", completeness.items)
+            self.assertTrue(completeness.items["bff_sql_artifacts"])
+            self.assertTrue(completeness.items["ui_integration_artifacts"])
             self.assertFalse(completeness.items["validation_results"])
 
     def test_analyze_cli_also_refreshes_runtime_outputs(self) -> None:

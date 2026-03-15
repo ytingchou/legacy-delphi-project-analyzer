@@ -151,6 +151,8 @@ class PipelineTests(unittest.TestCase):
             report_text = (output_root / "report" / "index.html").read_text(encoding="utf-8")
             self.assertIn("Complexity Dashboard", report_text)
             self.assertIn("Transition Specs", report_text)
+            self.assertIn("Backend SQL Handoff", report_text)
+            self.assertIn("UI Integration Handoff", report_text)
 
     def test_pipeline_handles_binary_dfm_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

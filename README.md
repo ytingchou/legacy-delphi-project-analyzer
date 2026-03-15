@@ -157,6 +157,24 @@ as `*BffSql` can be executed with `run-llm` to generate one bounded backend slic
 
 This is the foundation for the later agent loop, Cline subagent task packs, and auto-compact LLM orchestration workflow.
 
+Runtime completeness now also tracks whether backend SQL, UI pseudo, UI reference,
+and UI integration artifacts were generated, so the handoff state reflects more than
+just core transition specs.
+
+## v1.4 Reporting And Handoff
+
+The static web dashboard and the handoff manifest now expose the weak-model delivery
+artifacts directly:
+
+- Backend SQL handoff counts and endpoint/query tables
+- UI integration handoff counts and route/feature-dir tables
+- Runtime completeness flags for backend SQL and frontend artifact families
+- Handoff manifest entries that explicitly point downstream LLMs to:
+  - `llm-pack/bff-sql/`
+  - `llm-pack/ui-pseudo/`
+  - `llm-pack/ui-reference/`
+  - `llm-pack/ui-integration/`
+
 ## Task Packs And Model Profiles
 
 Task packs are emitted under `artifacts/runtime/taskpacks/` and include:
