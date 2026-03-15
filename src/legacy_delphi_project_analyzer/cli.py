@@ -7,13 +7,16 @@ from pathlib import Path
 
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.llm import run_llm_artifact
+from legacy_delphi_project_analyzer.cline import emit_cline_task
 from legacy_delphi_project_analyzer.orchestrator import (
     build_analysis_config,
     load_runtime_bundle,
     refresh_runtime_artifacts,
+    rerun_analysis_from_runtime_state,
     run_phases,
 )
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
+from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,6 +56,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read runtime phase orchestration files from an analysis output directory.",
     )
     phase_status_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+
+    build_taskpacks_parser = subparsers.add_parser(
+        "build-taskpacks",
+        help="Regenerate task packs for the current runtime blockers.",
+    )
+    build_taskpacks_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    build_taskpacks_parser.add_argument(
+        "--max-tasks",
+        type=int,
+        default=None,
+        help="Optional cap on the number of task packs to emit.",
+    )
+    build_taskpacks_parser.add_argument(
+        "--model-profile",
+        default=None,
+        help="Optional override for the runtime model profile when building task packs.",
+    )
+
+    dispatch_task_parser = subparsers.add_parser(
+        "dispatch-task",
+        help="Dispatch one generated task pack to the file-based Cline inbox.",
+    )
+    dispatch_task_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    dispatch_task_parser.add_argument("task_id", help="Task ID under runtime/taskpacks/ to dispatch.")
+    dispatch_task_parser.add_argument(
+        "--mode",
+        choices=["cline", "manual"],
+        default="cline",
+        help="Dispatch target. 'manual' only validates that the task pack exists.",
+    )
 
     report_parser = subparsers.add_parser(
         "serve-report", help="Serve a generated HTML report directory locally."
@@ -252,6 +285,39 @@ def main(argv: list[str] | None = None) -> int:
                 f"- {phase_state.phase}: {phase_state.status}, completion={phase_state.completion_score}/100, "
                 f"blockers={len(phase_state.blockers)}"
             )
+        return 0
+    if args.command == "build-taskpacks":
+        analysis_dir = Path(args.analysis_dir).resolve()
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is None:
+            raise SystemExit(f"Runtime state does not exist under {analysis_dir / 'runtime'}")
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        refresh_runtime_artifacts(
+            output,
+            target_model_profile=args.model_profile or run_state.target_model_profile,
+            dispatch_mode=run_state.dispatch_mode,
+            analysis_config=run_state.analysis_config,
+            provider_config=run_state.provider_config,
+        )
+        assert output.runtime_state is not None
+        taskpacks = build_taskpacks(output, output.runtime_state, max_tasks=args.max_tasks)
+        written = write_taskpacks(taskpacks, analysis_dir / "runtime")
+        print(f"Task packs generated: {len(written)}")
+        for path in written[:10]:
+            print(f"- {path}")
+        return 0
+    if args.command == "dispatch-task":
+        analysis_dir = Path(args.analysis_dir).resolve()
+        task_dir = analysis_dir / "runtime" / "taskpacks" / args.task_id
+        taskpack = load_taskpack(task_dir)
+        if taskpack is None:
+            raise SystemExit(f"Task pack does not exist or is invalid: {task_dir}")
+        if args.mode == "manual":
+            print(f"Task pack ready for manual execution: {task_dir}")
+            return 0
+        request_path = emit_cline_task(taskpack, task_dir, analysis_dir / "runtime")
+        print(f"Cline request emitted: {request_path}")
         return 0
     if args.command not in {"analyze", "run-phases"}:
         parser.error("Unsupported command")

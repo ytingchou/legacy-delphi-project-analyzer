@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.0
+
+- Added model profiles for weak 128k-token LLMs, including `qwen3_128k_weak` and `qwen3_128k_validate`.
+- Added blocker-to-task-pack conversion under `runtime/taskpacks/` with task pack indexes, run config, handoff templates, and LLM-compatible JSON payloads.
+- Added file-based Cline inbox/outbox adapters plus `build-taskpacks` and `dispatch-task` CLI commands.
+- Added regression coverage for qwen3 task-pack budgets, task-pack generation, and Cline dispatch round-trips.
+
 ## v1.1.0
 
 - Added runtime orchestration artifacts including `run-state.json`, `blocking-unknowns.json`, `artifact-completeness.json`, and per-phase summaries under `runtime/phases/`.

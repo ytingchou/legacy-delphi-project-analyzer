@@ -23,6 +23,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Direct OpenAI-compatible LLM execution with configurable token limits
 - Module-level transition spec generation with React pages, Spring endpoints, DTOs, readiness scores, and first-slice recommendations
 - Runtime orchestration outputs for multi-phase loops, blocker queues, and resumable handoff state
+- Qwen3-oriented model profiles, task packs, and file-based Cline inbox/outbox integration
 
 ## Usage
 
@@ -61,6 +62,18 @@ Inspect the current runtime phase state:
 
 ```bash
 legacy-delphi-analyzer phase-status /path/to/artifacts
+```
+
+Build blocker task packs for Cline or later loop execution:
+
+```bash
+legacy-delphi-analyzer build-taskpacks /path/to/artifacts --max-tasks 5
+```
+
+Dispatch one task pack into the file-based Cline inbox:
+
+```bash
+legacy-delphi-analyzer dispatch-task /path/to/artifacts task-query-orderlookup-placeholders
 ```
 
 Serve the generated web report locally:
@@ -123,6 +136,26 @@ before the team starts implementing React or Spring code.
 - `phases/<phase>/phase-summary.md`
 
 This is the foundation for the later agent loop, Cline subagent task packs, and auto-compact LLM orchestration workflow.
+
+## Task Packs And Model Profiles
+
+Task packs are emitted under `artifacts/runtime/taskpacks/` and include:
+
+- `agent-task.md`
+- `agent-context.json`
+- `agent-run-config.json`
+- `agent-expected-output-schema.json`
+- `agent-handoff-template.json`
+- `taskpack.json`
+
+Built-in model profiles currently include:
+
+- `qwen3_128k_weak`
+- `qwen3_128k_validate`
+- `strong_reasoning`
+
+The file-based Cline adapter writes requests to `artifacts/runtime/cline-inbox/<task-id>/request.json`
+and reads responses from `artifacts/runtime/cline-outbox/<task-id>/response.json`.
 
 ## External Delphi XE Search Paths
 
