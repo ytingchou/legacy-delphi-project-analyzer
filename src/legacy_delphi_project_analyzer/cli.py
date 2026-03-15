@@ -5,6 +5,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
 
 
@@ -82,6 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("report_dir", help="Path to the generated report directory.")
     report_parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind.")
     report_parser.add_argument("--port", type=int, default=8765, help="Port to bind.")
+
+    feedback_parser = subparsers.add_parser(
+        "ingest-feedback",
+        help="Import accepted/rejected prompt feedback and turn it into reusable analyzer rules.",
+    )
+    feedback_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    feedback_parser.add_argument("feedback_file", help="Path to a JSON feedback file.")
     return parser
 
 
@@ -90,6 +98,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "serve-report":
         return serve_report(Path(args.report_dir), host=args.host, port=args.port)
+    if args.command == "ingest-feedback":
+        try:
+            result = ingest_feedback(Path(args.analysis_dir), Path(args.feedback_file))
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(f"Feedback imported into: {result['analysis_dir']}")
+        print(
+            "Feedback summary: "
+            f"{result['feedback_entries']} entries, "
+            f"{result['accepted']} accepted, "
+            f"{result['rejected']} rejected, "
+            f"{result['needs_follow_up']} follow-up, "
+            f"{result['fallback_uses']} fallback uses"
+        )
+        return 0
     if args.command != "analyze":
         parser.error("Unsupported command")
 

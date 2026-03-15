@@ -10,7 +10,7 @@ from legacy_delphi_project_analyzer.artifacts import (
     build_transition_mapping,
     package_analysis,
 )
-from legacy_delphi_project_analyzer.knowledge import KnowledgeStore
+from legacy_delphi_project_analyzer.knowledge import KnowledgeStore, load_bootstrap_rules
 from legacy_delphi_project_analyzer.models import AnalysisOutput, ProjectInventory
 from legacy_delphi_project_analyzer.reporting import build_complexity_report
 from legacy_delphi_project_analyzer.utils import make_diagnostic
@@ -35,11 +35,18 @@ def run_analysis(
     project_root = project_root.resolve()
     output_dir = output_dir.resolve()
     phases = _normalize_phases(phases)
+    runtime_rules, bootstrap_diagnostics = load_bootstrap_rules(rules_dir, output_dir)
+    merged_search_paths = list(runtime_rules.get("search_paths", []))
+    for item in extra_search_paths or []:
+        if item not in merged_search_paths:
+            merged_search_paths.append(item)
+    merged_path_variables = dict(runtime_rules.get("path_variables", {}))
+    merged_path_variables.update(path_variables or {})
     workspace = resolve_workspace(
         project_root=project_root,
-        extra_search_paths=extra_search_paths,
+        extra_search_paths=merged_search_paths,
         workspace_config_path=workspace_config_path.resolve() if workspace_config_path else None,
-        path_variables=path_variables,
+        path_variables=merged_path_variables,
     )
     knowledge = KnowledgeStore(
         project_root=project_root,
@@ -51,6 +58,7 @@ def run_analysis(
 
     inventory = discover_project_files(project_root, knowledge, workspace)
     output = AnalysisOutput(inventory=inventory, output_dir=output_dir.as_posix())
+    output.diagnostics.extend(bootstrap_diagnostics)
     output.diagnostics.extend(workspace.diagnostics)
     output.diagnostics.extend(knowledge_diagnostics)
 
@@ -128,6 +136,7 @@ def run_analysis(
             output.resolved_queries,
             output.diagnostics,
             knowledge.apply_module_override,
+            knowledge.get_transition_hint,
         )
         output.business_flows = build_business_flows(
             output.pascal_units,

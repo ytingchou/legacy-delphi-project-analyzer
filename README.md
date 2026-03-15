@@ -50,6 +50,12 @@ Serve the generated web report locally:
 legacy-delphi-analyzer serve-report /path/to/artifacts/report
 ```
 
+Import accepted or rejected LLM feedback back into the analyzer:
+
+```bash
+legacy-delphi-analyzer ingest-feedback /path/to/artifacts /path/to/feedback.json
+```
+
 ## External Delphi XE Search Paths
 
 If the Delphi XE project references shared code outside the current repo, the analyzer can now
@@ -91,12 +97,12 @@ The analyzer will also read `.dproj` and `.cfg` search paths automatically. If a
 or a Delphi variable like `$(PDSS_SQL)` is unresolved, the run emits diagnostics, failure triage
 bundles, and prompt-ready hints so a weak internal LLM can still help close the gap.
 
-## v0.7 Highlights
+## v0.8 Highlights
 
-- Each prompt pack now carries a goal, verification prompt, and acceptance checks.
-- Each prompt and failure case now emits a minimal repro bundle JSON artifact.
-- Weak models can now be targeted with narrower goals such as search-path resolution,
-  placeholder inference, query intent classification, and flow behavior summarization.
+- Accepted prompt answers can now be imported and converted into reusable rules.
+- Learned path variables and search paths can automatically unblock the next `analyze` run.
+- Feedback artifacts are persisted as `accepted_rules.json`, `feedback-log.json`,
+  `rejected_rules.json`, and `feedback-insights.md`.
 
 ## Override File
 

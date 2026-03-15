@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.0
+
+- Added `ingest-feedback` so accepted or rejected LLM answers can be imported back into the analyzer.
+- Added automatic rule extraction for path variables, search paths, query hints, placeholder notes, and transition hints.
+- Added persistent `accepted_rules.json`, `feedback-log.json`, `rejected_rules.json`, and `feedback-insights.md`.
+- Added bootstrap rule loading so accepted workspace feedback can unblock the next analysis run automatically.
+
 ## v0.7.0
 
 - Added prompt closure artifacts with goal-specific prompt packs, verification prompts, and acceptance checks.

@@ -874,6 +874,10 @@ def _prioritized_support_paths(manifest: list[ArtifactManifestEntry]) -> list[st
     for entry in manifest:
         if "knowledge" in entry.tags and "insights" in entry.tags:
             priority.append(entry.path)
+        elif "knowledge" in entry.tags and "feedback-insights" in entry.tags:
+            priority.append(entry.path)
+        elif "knowledge" in entry.tags and "accepted-rules" in entry.tags:
+            priority.append(entry.path)
         elif "knowledge" in entry.tags and "overrides" in entry.tags:
             priority.append(entry.path)
         elif "diagnostics" in entry.tags or "knowledge" in entry.tags:

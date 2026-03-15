@@ -1,22 +1,48 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 from collections import Counter
 from datetime import UTC, datetime
 from difflib import get_close_matches
 from pathlib import Path
+from typing import Any
 
 from legacy_delphi_project_analyzer.models import DiagnosticRecord, ResolvedQueryArtifact
 from legacy_delphi_project_analyzer.utils import ensure_directory, make_diagnostic, write_json, write_text
 
 
-ALLOWED_OVERRIDE_KEYS = {
+ALLOWED_RULE_KEYS = {
     "ignore_globs": list,
     "module_overrides": dict,
     "xml_aliases": dict,
     "placeholder_notes": dict,
     "query_hints": dict,
+    "path_variables": dict,
+    "search_paths": list,
+    "transition_hints": dict,
 }
+RUNTIME_RULE_FILES = ("overrides.json", "accepted_rules.json")
+
+
+def load_bootstrap_rules(
+    rules_dir: Path | None,
+    output_dir: Path,
+) -> tuple[dict[str, Any], list[DiagnosticRecord]]:
+    diagnostics: list[DiagnosticRecord] = []
+    merged = _default_rules()
+    candidate_paths = []
+    if rules_dir:
+        candidate_paths.extend(rules_dir / file_name for file_name in RUNTIME_RULE_FILES)
+    candidate_paths.append(output_dir / "knowledge" / "accepted_rules.json")
+
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        payload = _read_json(path)
+        diagnostics.extend(_validate_rule_payload(payload, path))
+        _merge_rules(merged, _sanitize_rule_payload(payload))
+    return merged, diagnostics
 
 
 class KnowledgeStore:
@@ -33,13 +59,7 @@ class KnowledgeStore:
         self.output_dir = output_dir
         self.knowledge_dir = output_dir / "knowledge"
         self.diagnostics: list[DiagnosticRecord] = []
-        self.overrides = {
-            "ignore_globs": [],
-            "module_overrides": {},
-            "xml_aliases": {},
-            "placeholder_notes": {},
-            "query_hints": {},
-        }
+        self.overrides = _default_rules()
         self.learned = {
             "ignore_globs": [],
             "diagnostic_counts": {},
@@ -47,71 +67,31 @@ class KnowledgeStore:
             "missing_xml_refs": {},
             "missing_query_refs": {},
         }
+        self.feedback_log: list[dict[str, Any]] = []
         self._load()
 
     def _load(self) -> None:
-        if self.rules_dir:
-            overrides_path = self.rules_dir / "overrides.json"
-            if overrides_path.exists():
-                loaded = self._read_json(overrides_path)
-                self._validate_overrides(loaded, overrides_path)
-                self.overrides.update(loaded)
+        runtime_rules, runtime_diags = load_bootstrap_rules(self.rules_dir, self.output_dir)
+        self.overrides = runtime_rules
+        self.diagnostics.extend(runtime_diags)
+
         learned_path = self.knowledge_dir / "learned_patterns.json"
         if learned_path.exists():
-            self.learned.update(self._read_json(learned_path))
+            self.learned.update(_read_json(learned_path))
 
-    @staticmethod
-    def _read_json(path: Path) -> dict:
-        import json
-
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    def _validate_overrides(self, loaded: dict, path: Path) -> None:
-        for key, value in loaded.items():
-            expected = ALLOWED_OVERRIDE_KEYS.get(key)
-            if expected is None:
+        feedback_log_path = self.knowledge_dir / "feedback-log.json"
+        if feedback_log_path.exists():
+            payload = _read_json(feedback_log_path)
+            if isinstance(payload, list):
+                self.feedback_log = payload
+            else:
                 self.diagnostics.append(
                     make_diagnostic(
                         "warning",
-                        "KNOWLEDGE_OVERRIDE_UNKNOWN_KEY",
-                        f"Unknown override key '{key}' was loaded.",
-                        file_path=path.as_posix(),
-                        suggestion="Remove unknown keys or teach the analyzer how to use them.",
-                    )
-                )
-                continue
-            if not isinstance(value, expected):
-                self.diagnostics.append(
-                    make_diagnostic(
-                        "warning",
-                        "KNOWLEDGE_OVERRIDE_INVALID_TYPE",
-                        f"Override key '{key}' should be {expected.__name__}.",
-                        file_path=path.as_posix(),
-                        suggestion=f"Change '{key}' to a JSON {expected.__name__}.",
-                    )
-                )
-                continue
-            if isinstance(value, dict) and not all(
-                isinstance(item_key, str) and isinstance(item_value, str)
-                for item_key, item_value in value.items()
-            ):
-                self.diagnostics.append(
-                    make_diagnostic(
-                        "warning",
-                        "KNOWLEDGE_OVERRIDE_INVALID_MAPPING",
-                        f"Override key '{key}' must map string keys to string values.",
-                        file_path=path.as_posix(),
-                        suggestion=f"Normalize all keys and values under '{key}' to strings.",
-                    )
-                )
-            if isinstance(value, list) and not all(isinstance(item, str) for item in value):
-                self.diagnostics.append(
-                    make_diagnostic(
-                        "warning",
-                        "KNOWLEDGE_OVERRIDE_INVALID_LIST",
-                        f"Override key '{key}' must contain only strings.",
-                        file_path=path.as_posix(),
-                        suggestion=f"Normalize all entries under '{key}' to strings.",
+                        "KNOWLEDGE_FEEDBACK_LOG_INVALID",
+                        "feedback-log.json should contain a JSON array.",
+                        file_path=feedback_log_path.as_posix(),
+                        suggestion="Rewrite feedback-log.json as an array of feedback entries.",
                     )
                 )
 
@@ -145,6 +125,19 @@ class KnowledgeStore:
         value = module_overrides.get(candidate)
         return value if isinstance(value, str) else candidate
 
+    def get_transition_hint(self, candidate: str) -> str | None:
+        hints = self.overrides.get("transition_hints", {})
+        value = hints.get(candidate)
+        return value if isinstance(value, str) else None
+
+    def get_path_variables(self) -> dict[str, str]:
+        value = self.overrides.get("path_variables", {})
+        return value if isinstance(value, dict) else {}
+
+    def get_search_paths(self) -> list[str]:
+        value = self.overrides.get("search_paths", [])
+        return value if isinstance(value, list) else []
+
     def resolve_xml_alias(self, name: str) -> str:
         aliases = self.get_xml_aliases()
         return aliases.get(name, name)
@@ -166,6 +159,9 @@ class KnowledgeStore:
             }
         )
         return aliases
+
+    def get_feedback_log(self) -> list[dict[str, Any]]:
+        return list(self.feedback_log)
 
     def learn(
         self,
@@ -220,9 +216,13 @@ class KnowledgeStore:
             "xml_aliases": {},
             "placeholder_notes": {},
             "query_hints": {},
+            "path_variables": {},
+            "search_paths": [],
+            "transition_hints": {},
         }
         normalized_xml_names = sorted(
-            {Path(name).name.lower() for name in available_xml_names} | {Path(name).stem.lower() for name in available_xml_names}
+            {Path(name).name.lower() for name in available_xml_names}
+            | {Path(name).stem.lower() for name in available_xml_names}
         )
         for missing_name in missing_xml_refs:
             if not missing_name:
@@ -275,6 +275,11 @@ class KnowledgeStore:
                     lines.append(f"- {key}: {len(value)} suggestion(s)")
         else:
             lines.append("- No override suggestions were generated.")
+        lines.extend(["", "## Feedback Learning", ""])
+        if self.feedback_log:
+            lines.append(f"- Feedback entries loaded: {len(self.feedback_log)}")
+        else:
+            lines.append("- No feedback has been ingested yet.")
         lines.extend(["", "## Prompting Advice", ""])
         if severe:
             for item in severe[:5]:
@@ -283,3 +288,114 @@ class KnowledgeStore:
             lines.append("- Use business flow artifacts first, then add query artifacts only when needed.")
         lines.append("")
         return "\n".join(lines)
+
+
+def _default_rules() -> dict[str, Any]:
+    return {
+        "ignore_globs": [],
+        "module_overrides": {},
+        "xml_aliases": {},
+        "placeholder_notes": {},
+        "query_hints": {},
+        "path_variables": {},
+        "search_paths": [],
+        "transition_hints": {},
+    }
+
+
+def _read_json(path: Path) -> dict | list:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validate_rule_payload(payload: Any, path: Path) -> list[DiagnosticRecord]:
+    diagnostics: list[DiagnosticRecord] = []
+    if not isinstance(payload, dict):
+        diagnostics.append(
+            make_diagnostic(
+                "warning",
+                "KNOWLEDGE_OVERRIDE_INVALID_ROOT",
+                "Rule file must contain a JSON object.",
+                file_path=path.as_posix(),
+                suggestion="Rewrite the file as a JSON object keyed by rule type.",
+            )
+        )
+        return diagnostics
+
+    for key, value in payload.items():
+        expected = ALLOWED_RULE_KEYS.get(key)
+        if expected is None:
+            diagnostics.append(
+                make_diagnostic(
+                    "warning",
+                    "KNOWLEDGE_OVERRIDE_UNKNOWN_KEY",
+                    f"Unknown override key '{key}' was loaded.",
+                    file_path=path.as_posix(),
+                    suggestion="Remove unknown keys or teach the analyzer how to use them.",
+                )
+            )
+            continue
+        if not isinstance(value, expected):
+            diagnostics.append(
+                make_diagnostic(
+                    "warning",
+                    "KNOWLEDGE_OVERRIDE_INVALID_TYPE",
+                    f"Override key '{key}' should be {expected.__name__}.",
+                    file_path=path.as_posix(),
+                    suggestion=f"Change '{key}' to a JSON {expected.__name__}.",
+                )
+            )
+            continue
+        if isinstance(value, dict) and not all(
+            isinstance(item_key, str) and isinstance(item_value, str)
+            for item_key, item_value in value.items()
+        ):
+            diagnostics.append(
+                make_diagnostic(
+                    "warning",
+                    "KNOWLEDGE_OVERRIDE_INVALID_MAPPING",
+                    f"Override key '{key}' must map string keys to string values.",
+                    file_path=path.as_posix(),
+                    suggestion=f"Normalize all keys and values under '{key}' to strings.",
+                )
+            )
+        if isinstance(value, list) and not all(isinstance(item, str) for item in value):
+            diagnostics.append(
+                make_diagnostic(
+                    "warning",
+                    "KNOWLEDGE_OVERRIDE_INVALID_LIST",
+                    f"Override key '{key}' must contain only strings.",
+                    file_path=path.as_posix(),
+                    suggestion=f"Normalize all entries under '{key}' to strings.",
+                )
+            )
+    return diagnostics
+
+
+def _sanitize_rule_payload(payload: Any) -> dict[str, Any]:
+    sanitized = _default_rules()
+    if not isinstance(payload, dict):
+        return sanitized
+    for key, expected in ALLOWED_RULE_KEYS.items():
+        value = payload.get(key)
+        if expected is dict and isinstance(value, dict):
+            sanitized[key] = {
+                item_key: item_value
+                for item_key, item_value in value.items()
+                if isinstance(item_key, str) and isinstance(item_value, str)
+            }
+        elif expected is list and isinstance(value, list):
+            sanitized[key] = [item for item in value if isinstance(item, str)]
+    return sanitized
+
+
+def _merge_rules(base: dict[str, Any], incoming: dict[str, Any]) -> None:
+    for key, expected in ALLOWED_RULE_KEYS.items():
+        value = incoming.get(key)
+        if expected is dict and isinstance(value, dict):
+            current = base.setdefault(key, {})
+            if isinstance(current, dict):
+                current.update(value)
+        elif expected is list and isinstance(value, list):
+            current = base.setdefault(key, [])
+            if isinstance(current, list):
+                current.extend(item for item in value if item not in current)

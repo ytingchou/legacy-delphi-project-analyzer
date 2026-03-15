@@ -46,6 +46,7 @@ def build_transition_mapping(
     resolved_queries: list[ResolvedQueryArtifact],
     diagnostics: list[DiagnosticRecord],
     module_name_resolver,
+    transition_hint_resolver,
 ) -> TransitionMappingArtifact:
     unit_by_name = {item.unit_name.lower(): item for item in pascal_units}
     queries_by_xml = defaultdict(list)
@@ -75,6 +76,9 @@ def build_transition_mapping(
             risks.append("Some attached SQL artifacts still rely on Delphi-side placeholder replacement.")
         if form.datasets:
             notes.append(f"Datasets seen in DFM: {', '.join(form.datasets)}")
+        transition_hint = transition_hint_resolver(module_name)
+        if transition_hint:
+            notes.append(f"Learned transition hint: {transition_hint}")
         modules.append(
             BusinessModuleArtifact(
                 name=module_name,
@@ -100,6 +104,7 @@ def build_transition_mapping(
             risks.append("Unit appears to contain inline SQL that is not backed by SQL XML artifacts.")
         if unit.replace_tokens:
             risks.append("StringReplace tokens suggest runtime SQL mutation that remains heuristic.")
+        transition_hint = transition_hint_resolver(module_name)
         modules.append(
             BusinessModuleArtifact(
                 name=module_name,
@@ -111,7 +116,8 @@ def build_transition_mapping(
                 spring_candidates=_build_spring_candidates(module_name, unit_queries),
                 risks=risks,
                 open_questions=_module_questions(module_name, diagnostics),
-                notes=_unit_notes(unit),
+                notes=_unit_notes(unit)
+                + ([f"Learned transition hint: {transition_hint}"] if transition_hint else []),
             )
         )
 
@@ -440,6 +446,30 @@ def package_analysis(
                 "knowledge",
                 knowledge_dir / "knowledge-insights.md",
                 ["knowledge", "insights"],
+            )
+        )
+    if (knowledge_dir / "accepted_rules.json").exists():
+        manifest.append(
+            _manifest_entry(
+                "knowledge",
+                knowledge_dir / "accepted_rules.json",
+                ["knowledge", "accepted-rules"],
+            )
+        )
+    if (knowledge_dir / "feedback-log.json").exists():
+        manifest.append(
+            _manifest_entry(
+                "knowledge",
+                knowledge_dir / "feedback-log.json",
+                ["knowledge", "feedback-log"],
+            )
+        )
+    if (knowledge_dir / "feedback-insights.md").exists():
+        manifest.append(
+            _manifest_entry(
+                "knowledge",
+                knowledge_dir / "feedback-insights.md",
+                ["knowledge", "feedback-insights"],
             )
         )
 
