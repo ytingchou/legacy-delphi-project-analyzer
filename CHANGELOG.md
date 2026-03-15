@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.0
+
+- Added validation for `overrides.json` with non-fatal diagnostics for bad keys or types.
+- Added `knowledge-insights.md` and `suggested_overrides.json` generation.
+- Added close-match XML alias suggestions and placeholder-oriented query hints.
+- Included knowledge artifacts in packaged outputs and regression coverage.
+
 ## v0.3.0
 
 - Added business-flow extraction from DFM event bindings to Pascal method heuristics.

@@ -30,6 +30,8 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "llm-pack" / "boss-summary.md").exists())
             self.assertTrue((output_root / "errors" / "prompt-recipes.md").exists())
             self.assertTrue((output_root / "knowledge" / "learned_patterns.json").exists())
+            self.assertTrue((output_root / "knowledge" / "suggested_overrides.json").exists())
+            self.assertTrue((output_root / "knowledge" / "knowledge-insights.md").exists())
             self.assertTrue((output_root / "report" / "index.html").exists())
             self.assertGreaterEqual(len(output.transition_mapping.modules), 1)
             self.assertGreaterEqual(len(output.business_flows), 1)

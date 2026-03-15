@@ -433,6 +433,32 @@ def package_analysis(
         )
     )
 
+    knowledge_dir = output_root / "knowledge"
+    if (knowledge_dir / "learned_patterns.json").exists():
+        manifest.append(
+            _manifest_entry(
+                "knowledge",
+                knowledge_dir / "learned_patterns.json",
+                ["knowledge", "learning"],
+            )
+        )
+    if (knowledge_dir / "suggested_overrides.json").exists():
+        manifest.append(
+            _manifest_entry(
+                "knowledge",
+                knowledge_dir / "suggested_overrides.json",
+                ["knowledge", "overrides"],
+            )
+        )
+    if (knowledge_dir / "knowledge-insights.md").exists():
+        manifest.append(
+            _manifest_entry(
+                "knowledge",
+                knowledge_dir / "knowledge-insights.md",
+                ["knowledge", "insights"],
+            )
+        )
+
     load_bundles = _build_load_bundles(output, manifest)
     output.load_bundles = load_bundles
     for bundle in load_bundles:

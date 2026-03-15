@@ -31,9 +31,11 @@ def run_analysis(
     output_dir = output_dir.resolve()
     phases = _normalize_phases(phases)
     knowledge = KnowledgeStore(project_root=project_root, rules_dir=rules_dir, output_dir=output_dir)
+    knowledge_diagnostics = knowledge.get_diagnostics()
 
     inventory = discover_project_files(project_root, knowledge)
     output = AnalysisOutput(inventory=inventory, output_dir=output_dir.as_posix())
+    output.diagnostics.extend(knowledge_diagnostics)
 
     if "parse" in phases or "analyze" in phases or "package" in phases or "learn" in phases:
         for file_path in inventory.pas_files:
@@ -100,7 +102,7 @@ def run_analysis(
         resolver = SqlXmlResolver(
             output.sql_xml_files,
             diagnostics=output.diagnostics,
-            xml_aliases=knowledge.overrides.get("xml_aliases", {}),
+            xml_aliases=knowledge.get_xml_aliases(),
         )
         output.resolved_queries = resolver.resolve_all()
         output.transition_mapping = build_transition_mapping(
@@ -118,15 +120,19 @@ def run_analysis(
         )
         output.complexity_report = build_complexity_report(output)
 
+    if "learn" in phases or "package" in phases:
+        knowledge.learn(
+            output.diagnostics,
+            output.resolved_queries,
+            available_xml_names=inventory.xml_files,
+        )
+
     if "package" in phases:
         output.manifest, output.load_bundles = package_analysis(
             output,
             max_artifact_chars=max_artifact_chars,
             max_artifact_tokens=max_artifact_tokens,
         )
-
-    if "learn" in phases:
-        knowledge.learn(output.diagnostics, output.resolved_queries)
 
     return output
 

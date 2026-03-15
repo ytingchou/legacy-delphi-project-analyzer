@@ -15,7 +15,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Token-aware load bundles, business-flow dossiers, and leadership-facing complexity summaries
 - Static HTML dashboard output plus `serve-report` for local report preview
 - Diagnostics with prompt guidance for unresolved or low-confidence areas
-- Rule-driven knowledge store for reusable overrides and learned patterns
+- Rule-driven knowledge store for reusable overrides, learned patterns, and suggested overrides
 
 ## Usage
 
@@ -43,14 +43,14 @@ Serve the generated web report locally:
 legacy-delphi-analyzer serve-report /path/to/artifacts/report
 ```
 
-## v0.3 Highlights
+## v0.4 Highlights
 
-- Artifacts are now packaged with an approximate token budget rather than only
-  a character budget.
-- Each inferred business module gets a business-flow dossier and an LLM load
-  bundle that lists the minimum useful artifact set.
-- The analyzer now emits a boss-facing complexity report, executive summary,
-  and a static HTML dashboard under `report/index.html`.
+- `overrides.json` is now validated and bad entries surface as warnings instead
+  of crashing discovery or analysis.
+- The analyzer emits `knowledge-insights.md` and `suggested_overrides.json`
+  to speed up prompt engineering and rule curation.
+- Knowledge artifacts are included in the generated output set so they can be
+  reviewed alongside migration bundles and leadership reports.
 
 ## Override File
 
@@ -65,6 +65,12 @@ will load it. Supported keys:
   },
   "xml_aliases": {
     "pricing": "pricing.xml"
+  },
+  "placeholder_notes": {
+    "OrderLookup": "fPriceCheckRule is injected by Delphi business rules"
+  },
+  "query_hints": {
+    "OrderLookup": "Used by price-check screen before submitting manual overrides"
   }
 }
 ```
