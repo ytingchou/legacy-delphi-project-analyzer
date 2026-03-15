@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.10.0
+
+- Added direct OpenAI-compatible LLM execution with the new `run-llm` CLI command.
+- Added provider configuration for base URL, model, API key, prompt mode, and configurable input/output token limits.
+- Added `llm-runs/` outputs containing raw run artifacts, rendered response markdown, and feedback templates ready for `ingest-feedback`.
+- Added regression coverage for provider request formatting and context-token budgeting.
+
 ## v0.9.1
 
 - Removed SQL XML parameter `data_type` validation so custom types no longer emit warnings.

@@ -20,6 +20,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Delphi workspace resolution for external XE search paths and shared repos outside the main project root
 - Prompt closure artifacts with verification prompts, acceptance checks, and minimal repro bundles
 - Feedback learning plus prompt-effectiveness scoring for management reporting
+- Direct OpenAI-compatible LLM execution with configurable token limits
 
 ## Usage
 
@@ -56,6 +57,21 @@ Import accepted or rejected LLM feedback back into the analyzer:
 ```bash
 legacy-delphi-analyzer ingest-feedback /path/to/artifacts /path/to/feedback.json
 ```
+
+Run a prompt pack or failure triage directly against an OpenAI-compatible provider:
+
+```bash
+legacy-delphi-analyzer run-llm /path/to/artifacts \
+  --prompt-name OrderLookupClarify \
+  --provider-base-url http://your-provider-host:8000/v1 \
+  --model qwen3-32b \
+  --api-key-env OPENAI_API_KEY \
+  --token-limit 6000 \
+  --output-token-limit 1200
+```
+
+This writes run outputs under `artifacts/llm-runs/`, including a feedback template JSON
+that can be edited and passed to `ingest-feedback`.
 
 ## External Delphi XE Search Paths
 
@@ -98,13 +114,11 @@ The analyzer will also read `.dproj` and `.cfg` search paths automatically. If a
 or a Delphi variable like `$(PDSS_SQL)` is unresolved, the run emits diagnostics, failure triage
 bundles, and prompt-ready hints so a weak internal LLM can still help close the gap.
 
-## v0.9 Highlights
+## v0.10 Highlights
 
-- Imported prompt feedback is now scored so you can see which prompts and goals actually work.
-- Management outputs now include `prompt-effectiveness.json`, `prompt-effectiveness.md`,
-  and web-report sections for prompt success and prompt failure hotspots.
-- Boss summary and dashboard can now show whether the team is blocked by weak prompts
-  or by real legacy-system unknowns.
+- Prompt packs and failure triage can now be executed directly against an OpenAI-compatible provider.
+- You can control input context size with `--token-limit` and completion size with `--output-token-limit`.
+- Each LLM run now produces a saved run artifact and a feedback template so model output can be learned back into the analyzer.
 
 ## Override File
 

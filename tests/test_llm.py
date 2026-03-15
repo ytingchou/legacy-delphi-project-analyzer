@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from legacy_delphi_project_analyzer.llm import run_llm_artifact
+from legacy_delphi_project_analyzer.pipeline import run_analysis
+
+
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sample_project"
+
+
+class _FakeHttpResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload).encode("utf-8")
+
+    def __enter__(self) -> "_FakeHttpResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class LlmIntegrationTests(unittest.TestCase):
+    def test_run_llm_uses_prompt_pack_and_writes_feedback_template(self) -> None:
+        recorded_request: dict = {}
+
+        def fake_urlopen(request, timeout=0):  # type: ignore[no-untyped-def]
+            recorded_request["url"] = request.full_url
+            recorded_request["headers"] = dict(request.header_items())
+            recorded_request["body"] = json.loads(request.data.decode("utf-8"))
+            recorded_request["timeout"] = timeout
+            return _FakeHttpResponse(
+                {
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps({"result": "ok", "echo_model": "qwen3-test"}),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 111,
+                        "completion_tokens": 22,
+                        "total_tokens": 133,
+                    },
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = run_analysis(
+                project_root=FIXTURE_ROOT,
+                output_dir=Path(tmpdir) / "artifacts",
+                phases=["all"],
+            )
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                result = run_llm_artifact(
+                    analysis_dir=Path(output.output_dir),
+                    prompt_name="OrderLookupClarify",
+                    provider_base_url="http://provider.example",
+                    model="qwen3-test",
+                    api_key="secret-token",
+                    output_token_limit=256,
+                    token_limit=1200,
+                )
+
+            self.assertEqual(result.artifact_kind, "prompt-pack")
+            self.assertEqual(result.artifact_name, "OrderLookupClarify")
+            self.assertEqual(result.parsed_response["result"], "ok")
+            self.assertTrue(Path(result.feedback_template_path or "").exists())
+            self.assertTrue((Path(output.output_dir) / "llm-runs" / f"{result.run_id}.json").exists())
+            self.assertEqual(recorded_request["url"], "http://provider.example/v1/chat/completions")
+            self.assertEqual(recorded_request["body"]["model"], "qwen3-test")
+            self.assertEqual(recorded_request["body"]["max_tokens"], 256)
+            self.assertEqual(recorded_request["headers"]["Authorization"], "Bearer secret-token")
+
+    def test_run_llm_respects_context_token_limit(self) -> None:
+        def fake_urlopen(request, timeout=0):  # type: ignore[no-untyped-def]
+            return _FakeHttpResponse(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps({"result": "ok"}),
+                            }
+                        }
+                    ]
+                }
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            analysis_dir = Path(tmpdir) / "analysis"
+            prompt_dir = analysis_dir / "prompt-pack"
+            prompt_dir.mkdir(parents=True, exist_ok=True)
+            context_one = analysis_dir / "context-one.md"
+            context_two = analysis_dir / "context-two.md"
+            context_one.write_text("A\n" * 200, encoding="utf-8")
+            context_two.write_text("B\n" * 200, encoding="utf-8")
+            (prompt_dir / "manualprompt.json").write_text(
+                json.dumps(
+                    {
+                        "name": "ManualPrompt",
+                        "goal": "resolve_search_path",
+                        "target_model": "qwen3-128k",
+                        "context_budget_tokens": 1000,
+                        "context_paths": [context_one.as_posix(), context_two.as_posix()],
+                        "primary_prompt": "Return JSON with keys result.",
+                        "expected_response_schema": {"result": "string"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                result = run_llm_artifact(
+                    analysis_dir=analysis_dir,
+                    prompt_name="ManualPrompt",
+                    provider_base_url="http://provider.example/v1",
+                    model="manual-model",
+                    token_limit=120,
+                    output_token_limit=64,
+                )
+
+            self.assertEqual(result.included_context_paths, [context_one.as_posix()])
+            self.assertIn(context_two.as_posix(), result.skipped_context_paths)
+            self.assertLessEqual(result.input_token_limit, 120)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -6,6 +6,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
+from legacy_delphi_project_analyzer.llm import run_llm_artifact
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
 
 
@@ -90,6 +91,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     feedback_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
     feedback_parser.add_argument("feedback_file", help="Path to a JSON feedback file.")
+
+    llm_parser = subparsers.add_parser(
+        "run-llm",
+        help="Run a prompt pack or failure triage artifact against an OpenAI-compatible provider.",
+    )
+    llm_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    llm_target = llm_parser.add_mutually_exclusive_group(required=True)
+    llm_target.add_argument("--prompt-name", help="Prompt pack name to execute, for example OrderLookupClarify.")
+    llm_target.add_argument("--failure-name", help="Failure triage name to execute.")
+    llm_target.add_argument("--artifact-json", help="Direct path to a prompt/failure JSON or repro-bundle JSON.")
+    llm_parser.add_argument("--provider-base-url", required=True, help="OpenAI-compatible provider base URL.")
+    llm_parser.add_argument("--model", required=True, help="Provider model name.")
+    llm_parser.add_argument("--api-key", default=None, help="Bearer token for the provider. Optional for local providers.")
+    llm_parser.add_argument(
+        "--api-key-env",
+        default="OPENAI_API_KEY",
+        help="Environment variable to read the provider API key from when --api-key is omitted.",
+    )
+    llm_parser.add_argument(
+        "--prompt-mode",
+        choices=["primary", "fallback", "verification"],
+        default="primary",
+        help="Which prompt variant from the artifact to execute.",
+    )
+    llm_parser.add_argument(
+        "--token-limit",
+        type=int,
+        default=None,
+        help="Maximum estimated input/context tokens to include in the request. Defaults to the artifact budget.",
+    )
+    llm_parser.add_argument(
+        "--output-token-limit",
+        type=int,
+        default=1200,
+        help="Maximum completion tokens requested from the provider.",
+    )
+    llm_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.1,
+        help="Sampling temperature sent to the provider.",
+    )
+    llm_parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+        help="HTTP timeout for the provider request.",
+    )
     return parser
 
 
@@ -112,6 +161,35 @@ def main(argv: list[str] | None = None) -> int:
             f"{result['needs_follow_up']} follow-up, "
             f"{result['fallback_uses']} fallback uses"
         )
+        return 0
+    if args.command == "run-llm":
+        try:
+            result = run_llm_artifact(
+                analysis_dir=Path(args.analysis_dir),
+                prompt_name=args.prompt_name,
+                failure_name=args.failure_name,
+                artifact_json_path=Path(args.artifact_json) if args.artifact_json else None,
+                provider_base_url=args.provider_base_url,
+                model=args.model,
+                api_key=args.api_key,
+                api_key_env=args.api_key_env,
+                prompt_mode=args.prompt_mode,
+                token_limit=args.token_limit,
+                output_token_limit=args.output_token_limit,
+                temperature=args.temperature,
+                timeout_seconds=args.timeout_seconds,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(f"LLM run complete: {result.run_id}")
+        print(
+            "LLM summary: "
+            f"{result.artifact_kind} {result.artifact_name}, "
+            f"model={result.model}, "
+            f"input_tokens~{result.request_tokens_estimate}, "
+            f"context={len(result.included_context_paths)} file(s)"
+        )
+        print(f"Feedback template: {result.feedback_template_path}")
         return 0
     if args.command != "analyze":
         parser.error("Unsupported command")

@@ -266,6 +266,30 @@ class PromptEffectivenessReport:
 
 
 @dataclass(slots=True)
+class LlmRunArtifact:
+    run_id: str
+    artifact_kind: str
+    artifact_name: str
+    prompt_mode: str
+    provider_base_url: str
+    model: str
+    target_model: str | None = None
+    goal: str | None = None
+    input_token_limit: int = 0
+    output_token_limit: int = 0
+    temperature: float = 0.0
+    request_tokens_estimate: int = 0
+    included_context_paths: list[str] = field(default_factory=list)
+    skipped_context_paths: list[str] = field(default_factory=list)
+    response_text: str = ""
+    parsed_response: dict[str, Any] = field(default_factory=dict)
+    usage: dict[str, Any] = field(default_factory=dict)
+    raw_response: dict[str, Any] = field(default_factory=dict)
+    request_payload: dict[str, Any] = field(default_factory=dict)
+    feedback_template_path: str | None = None
+
+
+@dataclass(slots=True)
 class ModuleComplexityScore:
     module_name: str
     score: int
