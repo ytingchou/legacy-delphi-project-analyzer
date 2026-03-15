@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from legacy_delphi_project_analyzer.feedback import ingest_feedback
+from legacy_delphi_project_analyzer.feedback import ingest_feedback, ingest_feedback_entries
 from legacy_delphi_project_analyzer.pipeline import run_analysis
 
 
@@ -205,6 +205,37 @@ WHERE status = :status
                 accepted_rules["transition_hints"]["OrderEntry"],
                 "Implement OrderEntryPage plus GET /api/order-entry/order-lookup before any write path.",
             )
+
+    def test_backend_sql_feedback_entries_updates_transition_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = run_analysis(
+                project_root=FIXTURE_ROOT,
+                output_dir=Path(tmpdir) / "artifacts",
+                phases=["all"],
+            )
+            result = ingest_feedback_entries(
+                Path(output.output_dir),
+                [
+                    {
+                        "prompt_name": "OrderEntryOrderLookupBffSql",
+                        "status": "accepted",
+                        "response": {
+                            "module_name": "OrderEntry",
+                            "endpoint_name": "OrderEntryOrderLookupEndpoint",
+                            "controller_contract": "GET /api/order-entry/order-lookup -> OrderEntryOrderLookupRow[]",
+                            "repository_method": "OrderLookupRepository.executeOrderLookup(request)",
+                        },
+                    }
+                ],
+            )
+            self.assertEqual(result["accepted"], 1)
+            accepted_rules = json.loads(
+                (Path(output.output_dir) / "knowledge" / "accepted_rules.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertIn("OrderEntry", accepted_rules["transition_hints"])
+            self.assertIn("OrderLookupRepository.executeOrderLookup", accepted_rules["transition_hints"]["OrderEntry"])
 
 
 if __name__ == "__main__":

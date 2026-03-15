@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.0
+
+- Added feedback learning support for the new backend SQL and UI handoff prompt goals, so accepted weak-model output can be learned back into transition hints.
+- Added compact-guide paths and prompt-goal summaries to `llm-pack/handoff-manifest.json` for downstream Cline or manual loop orchestration.
+- Extended runtime summaries and regression coverage so the new compact guides and backend/UI prompt goals remain visible after packaging.
+- Added programmatic `ingest_feedback_entries(...)` coverage for backend SQL handoff feedback.
+
 ## v1.5.0
 
 - Added `llm-pack/backend-sql-manifest.json` and `llm-pack/backend-sql-guide.md` for qwen3-friendly backend load order and prompt-pack selection.

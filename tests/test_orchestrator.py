@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,6 +40,11 @@ class OrchestratorTests(unittest.TestCase):
             self.assertTrue((runtime_dir / "state-summary.md").exists())
             self.assertTrue((runtime_dir / "phase-delta.md").exists())
             self.assertTrue((Path(output.output_dir) / "llm-pack" / "handoff-manifest.json").exists())
+            handoff_manifest = json.loads(
+                (Path(output.output_dir) / "llm-pack" / "handoff-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
             self.assertGreaterEqual(len(phase_states), 6)
             self.assertTrue(any(item.phase == "transition_validate" for item in phase_states))
             self.assertGreaterEqual(len(blockers), 2)
@@ -52,6 +58,8 @@ class OrchestratorTests(unittest.TestCase):
             self.assertTrue(completeness.items["bff_sql_artifacts"])
             self.assertTrue(completeness.items["ui_integration_artifacts"])
             self.assertFalse(completeness.items["validation_results"])
+            self.assertIn("llm-pack/backend-sql-guide.md", handoff_manifest["compact_guides"])
+            self.assertIn("generate_bff_oracle_sql_logic", handoff_manifest["prompt_pack_goals"])
 
     def test_analyze_cli_also_refreshes_runtime_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

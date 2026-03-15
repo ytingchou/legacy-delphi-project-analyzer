@@ -336,6 +336,13 @@ def _build_handoff_manifest(
             }
             for item in blockers[:20]
         ],
+        "prompt_pack_goals": sorted({item.goal for item in output.prompt_packs}),
+        "compact_guides": [
+            "llm-pack/backend-sql-guide.md",
+            "llm-pack/backend-sql-manifest.json",
+            "llm-pack/ui-handoff-guide.md",
+            "llm-pack/ui-handoff-manifest.json",
+        ],
         "recommended_artifacts": [
             "llm-pack/project-summary.md",
             "llm-pack/load-plan.json",
@@ -344,6 +351,8 @@ def _build_handoff_manifest(
             "llm-pack/ui-pseudo/",
             "llm-pack/ui-reference/",
             "llm-pack/ui-integration/",
+            "llm-pack/backend-sql-guide.md",
+            "llm-pack/ui-handoff-guide.md",
             "prompt-pack/",
             "runtime/state-summary.md",
         ],
@@ -416,6 +425,7 @@ def _render_runtime_summary(
 - Target model profile: {run_state.target_model_profile}
 - Artifact completeness: {completeness.completed_count}/{completeness.required_count}
 - Blocking task: {run_state.blocking_task_id or 'None'}
+- Backend/UI compact guides: {sum(1 for key, value in completeness.items.items() if key.endswith('_artifacts') and value)}
 
 ## Top Blockers
 

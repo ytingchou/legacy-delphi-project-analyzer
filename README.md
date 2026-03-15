@@ -193,6 +193,18 @@ These files are deliberately small. They tell the weak model:
 - the estimated bundle token size
 - the exact next artifact paths to read
 
+## v1.6 Feedback And Handoff Loop
+
+The analyzer can now learn from accepted backend SQL and frontend handoff prompt
+results as well, not only from the older clarification prompts.
+
+This matters for your internal weak models because:
+
+- accepted `*BffSql` output can be folded back into transition hints
+- accepted UI prompt output can be folded back into later migration runs
+- `llm-pack/handoff-manifest.json` now points explicitly to the compact guides and
+  the generated prompt-goal families, which makes later Cline/manual loops easier
+
 ## Task Packs And Model Profiles
 
 Task packs are emitted under `artifacts/runtime/taskpacks/` and include:

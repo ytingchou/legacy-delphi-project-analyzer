@@ -16,10 +16,19 @@ def ingest_feedback(analysis_dir: Path, feedback_path: Path) -> dict[str, Any]:
         raise ValueError(f"Analysis directory does not exist: {analysis_dir}")
     if not feedback_path.exists():
         raise ValueError(f"Feedback file does not exist: {feedback_path}")
+    feedback_entries = _load_feedback_entries(feedback_path)
+    return ingest_feedback_entries(analysis_dir, feedback_entries)
+
+
+def ingest_feedback_entries(
+    analysis_dir: Path,
+    feedback_entries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    analysis_dir = analysis_dir.resolve()
+    if not analysis_dir.exists():
+        raise ValueError(f"Analysis directory does not exist: {analysis_dir}")
     knowledge_dir = analysis_dir / "knowledge"
     ensure_directory(knowledge_dir)
-
-    feedback_entries = _load_feedback_entries(feedback_path)
     prompt_index = _load_prompt_index(analysis_dir)
     accepted_rules = _load_json(knowledge_dir / "accepted_rules.json", default=_default_rules())
     feedback_log = _load_json(knowledge_dir / "feedback-log.json", default=[])
@@ -191,6 +200,38 @@ def _infer_rules(prompt_meta: dict[str, Any], response: Any) -> dict[str, Any]:
         behavior = response.get("likely_behavior")
         if isinstance(behavior, str) and behavior and isinstance(subject, str) and subject:
             rules["transition_hints"][subject] = behavior
+    elif goal == "generate_bff_oracle_sql_logic":
+        module_name = response.get("module_name") if isinstance(response.get("module_name"), str) else None
+        controller_contract = response.get("controller_contract")
+        repository_method = response.get("repository_method")
+        if isinstance(module_name, str) and module_name and isinstance(controller_contract, str) and controller_contract:
+            hint = controller_contract
+            if isinstance(repository_method, str) and repository_method:
+                hint += f" | Repository: {repository_method}"
+            rules["transition_hints"][module_name] = hint
+    elif goal == "generate_react_pseudo_ui":
+        module_name = response.get("module_name") if isinstance(response.get("module_name"), str) else None
+        page_name = response.get("page_name")
+        components = response.get("components")
+        if isinstance(module_name, str) and module_name and isinstance(page_name, str) and page_name:
+            component_list = [item for item in components if isinstance(item, str)] if isinstance(components, list) else []
+            if component_list:
+                rules["transition_hints"][module_name] = (
+                    f"Pseudo UI confirmed for {page_name}: {', '.join(component_list[:3])}"
+                )
+    elif goal == "integrate_react_transition_ui":
+        module_name = response.get("module_name") if isinstance(response.get("module_name"), str) else None
+        page_name = response.get("page_name")
+        feature_dir = response.get("target_feature_dir")
+        if (
+            isinstance(module_name, str)
+            and module_name
+            and isinstance(page_name, str)
+            and page_name
+            and isinstance(feature_dir, str)
+            and feature_dir
+        ):
+            rules["transition_hints"][module_name] = f"Integrate {page_name} under {feature_dir}"
     return rules
 
 
