@@ -221,6 +221,7 @@ def taskpack_to_llm_payload(taskpack: TaskPack) -> dict[str, Any]:
     return {
         "name": taskpack.task_id,
         "goal": taskpack.task_type,
+        "priority": taskpack.priority,
         "subject_name": taskpack.subject_name,
         "target_model": taskpack.target_model_profile,
         "issue_summary": taskpack.issue_summary,
@@ -236,6 +237,8 @@ def taskpack_to_llm_payload(taskpack: TaskPack) -> dict[str, Any]:
         "task_type": taskpack.task_type,
         "module_name": taskpack.module_name,
         "phase": taskpack.phase,
+        "source_prompt_name": taskpack.source_prompt_name,
+        "source_kind": taskpack.source_kind,
     }
 
 

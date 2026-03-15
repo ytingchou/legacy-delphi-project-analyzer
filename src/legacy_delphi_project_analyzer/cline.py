@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 from legacy_delphi_project_analyzer.taskpacks import TaskPack
@@ -43,3 +44,19 @@ def write_cline_response(task_id: str, runtime_dir: Path, payload: dict[str, Any
     response_path = response_dir / "response.json"
     write_json(response_path, payload)
     return response_path
+
+
+def wait_for_cline_response(
+    task_id: str,
+    runtime_dir: Path,
+    *,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 1.0,
+) -> dict[str, Any] | None:
+    deadline = time.time() + max(1, timeout_seconds)
+    while time.time() < deadline:
+        payload = collect_cline_response(task_id, runtime_dir)
+        if payload is not None:
+            return payload
+        time.sleep(max(0.1, poll_interval_seconds))
+    return None

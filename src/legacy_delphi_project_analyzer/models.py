@@ -394,6 +394,38 @@ class UiIntegrationArtifact:
 
 
 @dataclass(slots=True)
+class ValidationRecord:
+    task_id: str
+    task_type: str
+    prompt_mode: str
+    status: str
+    schema_valid: bool
+    evidence_valid: bool
+    analysis_dir: str
+    subject_name: str | None = None
+    module_name: str | None = None
+    response_path: str | None = None
+    parsed_response: dict[str, Any] = field(default_factory=dict)
+    supported_claims: list[str] = field(default_factory=list)
+    unsupported_claims: list[str] = field(default_factory=list)
+    missing_evidence: list[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
+    should_learn: bool = False
+    should_retry: bool = False
+    validated_at: str | None = None
+
+
+@dataclass(slots=True)
+class GeneratedCodeArtifact:
+    module_name: str
+    language: str
+    relative_path: str
+    artifact_kind: str
+    source_spec: str
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LlmRunArtifact:
     run_id: str
     artifact_kind: str

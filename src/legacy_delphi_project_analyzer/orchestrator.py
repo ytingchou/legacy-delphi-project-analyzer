@@ -49,6 +49,7 @@ def run_phases(
     target_model: str = "qwen3-128k",
     target_model_profile: str = "qwen3_128k_weak",
     dispatch_mode: str = "manual",
+    provider_config: dict[str, Any] | None = None,
 ) -> Any:
     output = run_analysis(
         project_root=project_root,
@@ -78,6 +79,7 @@ def run_phases(
             max_artifact_tokens=max_artifact_tokens,
             target_model=target_model,
         ),
+        provider_config=provider_config,
     )
     return output
 

@@ -8,6 +8,13 @@ from pathlib import Path
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.llm import run_llm_artifact
 from legacy_delphi_project_analyzer.cline import emit_cline_task
+from legacy_delphi_project_analyzer.agent_loop import (
+    load_task_attempts,
+    load_task_history,
+    run_loop,
+    validate_task_response,
+)
+from legacy_delphi_project_analyzer.codegen import generate_transition_code
 from legacy_delphi_project_analyzer.orchestrator import (
     build_analysis_config,
     load_runtime_bundle,
@@ -50,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="manual",
         help="Dispatch mode recorded in runtime state for later loop execution.",
     )
+    _add_provider_arguments(phase_runner_parser)
 
     phase_status_parser = subparsers.add_parser(
         "phase-status",
@@ -73,6 +81,60 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional override for the runtime model profile when building task packs.",
     )
+
+    validate_response_parser = subparsers.add_parser(
+        "validate-response",
+        help="Validate one task response against schema and recovered legacy evidence.",
+    )
+    validate_response_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    validate_response_parser.add_argument("task_id", help="Task ID under runtime/taskpacks/ to validate.")
+    validate_response_parser.add_argument(
+        "--response-file",
+        default=None,
+        help="Optional response JSON path. Defaults to runtime/taskpacks/<task-id>/agent-response.json or the Cline outbox response.",
+    )
+    validate_response_parser.add_argument(
+        "--prompt-mode",
+        choices=["primary", "fallback", "verification"],
+        default="primary",
+        help="Prompt mode associated with the response being validated.",
+    )
+
+    loop_parser = subparsers.add_parser(
+        "run-loop",
+        help="Run the bounded orchestration loop until blockers are reduced or stop conditions are hit.",
+    )
+    loop_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    loop_parser.add_argument(
+        "--dispatch-mode",
+        choices=["manual", "provider", "cline"],
+        default=None,
+        help="Override the runtime dispatch mode for this loop run.",
+    )
+    loop_parser.add_argument("--max-loops", type=int, default=10, help="Maximum loop iterations for this run.")
+    loop_parser.add_argument("--max-task-attempts", type=int, default=3, help="Maximum attempts per task.")
+    loop_parser.add_argument("--wait-seconds", type=int, default=120, help="Wait time for provider/Cline responses.")
+    loop_parser.add_argument("--poll-seconds", type=float, default=1.0, help="Polling interval for Cline responses.")
+    loop_parser.add_argument("--timeout-seconds", type=int, default=120, help="Provider HTTP timeout.")
+    _add_provider_arguments(loop_parser)
+
+    resume_loop_parser = subparsers.add_parser(
+        "resume-loop",
+        help="Resume a previously prepared orchestration loop using the saved runtime state.",
+    )
+    resume_loop_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    resume_loop_parser.add_argument("--max-loops", type=int, default=10, help="Maximum loop iterations for this run.")
+    resume_loop_parser.add_argument("--max-task-attempts", type=int, default=3, help="Maximum attempts per task.")
+    resume_loop_parser.add_argument("--wait-seconds", type=int, default=120, help="Wait time for provider/Cline responses.")
+    resume_loop_parser.add_argument("--poll-seconds", type=float, default=1.0, help="Polling interval for Cline responses.")
+    resume_loop_parser.add_argument("--timeout-seconds", type=int, default=120, help="Provider HTTP timeout.")
+    _add_provider_arguments(resume_loop_parser)
+
+    loop_status_parser = subparsers.add_parser(
+        "loop-status",
+        help="Read current loop state, task attempts, and task history from runtime files.",
+    )
+    loop_status_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
 
     dispatch_task_parser = subparsers.add_parser(
         "dispatch-task",
@@ -148,6 +210,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=120,
         help="HTTP timeout for the provider request.",
     )
+
+    codegen_parser = subparsers.add_parser(
+        "generate-code",
+        help="Generate validated React and Spring Boot skeletons from transition specs.",
+    )
+    codegen_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    codegen_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory for generated skeletons. Defaults to <analysis_dir>/codegen.",
+    )
+    codegen_parser.add_argument(
+        "--allow-unvalidated",
+        action="store_true",
+        help="Generate skeletons even when validation results are missing.",
+    )
     return parser
 
 
@@ -213,6 +291,35 @@ def _add_analysis_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_provider_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--provider-base-url", default=None, help="OpenAI-compatible provider base URL.")
+    parser.add_argument("--model", default=None, help="Provider model name.")
+    parser.add_argument("--api-key", default=None, help="Bearer token for the provider.")
+    parser.add_argument(
+        "--api-key-env",
+        default="OPENAI_API_KEY",
+        help="Environment variable for the provider API key when --api-key is omitted.",
+    )
+    parser.add_argument(
+        "--token-limit",
+        type=int,
+        default=None,
+        help="Optional input/context token budget override for provider loop execution.",
+    )
+    parser.add_argument(
+        "--output-token-limit",
+        type=int,
+        default=None,
+        help="Optional output token budget override for provider loop execution.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Optional provider temperature override for loop execution.",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -261,6 +368,77 @@ def main(argv: list[str] | None = None) -> int:
             f"context={len(result.included_context_paths)} file(s)"
         )
         print(f"Feedback template: {result.feedback_template_path}")
+        return 0
+    if args.command == "validate-response":
+        analysis_dir = Path(args.analysis_dir).resolve()
+        task_dir = analysis_dir / "runtime" / "taskpacks" / args.task_id
+        response_path = Path(args.response_file).resolve() if args.response_file else None
+        result = validate_task_response(
+            analysis_dir=analysis_dir,
+            task_dir=task_dir,
+            response_path=response_path,
+            prompt_mode=args.prompt_mode,
+        )
+        print(f"Validation status: {result.status}")
+        print(
+            f"Schema valid: {str(result.schema_valid).lower()}, "
+            f"evidence valid: {str(result.evidence_valid).lower()}, "
+            f"supported={len(result.supported_claims)}, "
+            f"unsupported={len(result.unsupported_claims)}, "
+            f"missing={len(result.missing_evidence)}"
+        )
+        return 0
+    if args.command in {"run-loop", "resume-loop"}:
+        provider_config = _provider_config_from_args(args)
+        result = run_loop(
+            Path(args.analysis_dir),
+            dispatch_mode=getattr(args, "dispatch_mode", None),
+            max_loops=args.max_loops,
+            max_task_attempts=args.max_task_attempts,
+            wait_seconds=args.wait_seconds,
+            poll_seconds=args.poll_seconds,
+            provider_base_url=provider_config.get("provider_base_url"),
+            model=provider_config.get("model"),
+            api_key=provider_config.get("api_key"),
+            api_key_env=provider_config.get("api_key_env", "OPENAI_API_KEY"),
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(
+            f"Loop complete: status={result.status}, phase={result.current_phase}, "
+            f"iteration={result.loop_iteration}, stop_reason={result.stop_reason or 'None'}"
+        )
+        return 0
+    if args.command == "loop-status":
+        analysis_dir = Path(args.analysis_dir).resolve()
+        runtime_dir = analysis_dir / "runtime"
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is None:
+            raise SystemExit(f"Runtime state does not exist under {runtime_dir}")
+        history = load_task_history(runtime_dir)
+        attempts = load_task_attempts(runtime_dir)
+        print(
+            f"Loop: status={run_state.status}, phase={run_state.current_phase}, "
+            f"iteration={run_state.loop_iteration}, blocking={run_state.blocking_task_id or 'None'}"
+        )
+        print(f"Task attempts tracked: {len(attempts)}")
+        print(f"Task history entries: {len(history)}")
+        for item in history[-5:]:
+            print(
+                f"- {item.get('task_id')}: "
+                f"{item.get('validation_status') or item.get('status') or 'unknown'} "
+                f"({item.get('prompt_mode') or 'n/a'})"
+            )
+        return 0
+    if args.command == "generate-code":
+        generated = generate_transition_code(
+            Path(args.analysis_dir),
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+            require_validated=not args.allow_unvalidated,
+        )
+        base_dir = Path(args.output_dir).resolve() if args.output_dir else (Path(args.analysis_dir).resolve() / "codegen")
+        print(f"Generated code skeletons: {len(generated)}")
+        print(f"Output directory: {base_dir}")
         return 0
     if args.command == "phase-status":
         bundle = load_runtime_bundle(Path(args.analysis_dir))
@@ -352,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
             target_model=args.target_model,
             target_model_profile=args.model_profile,
             dispatch_mode=args.dispatch_mode,
+            provider_config=_provider_config_from_args(args),
         )
     else:
         output = run_analysis(
@@ -428,3 +607,20 @@ def _parse_path_variables(values: list[str]) -> dict[str, str]:
             raise SystemExit(f"Invalid --path-var value '{item}'. Expected NAME=VALUE.")
         parsed[key] = value
     return parsed
+
+
+def _provider_config_from_args(args) -> dict[str, object]:
+    config: dict[str, object] = {}
+    for key in (
+        "provider_base_url",
+        "model",
+        "api_key",
+        "api_key_env",
+        "token_limit",
+        "output_token_limit",
+        "temperature",
+    ):
+        value = getattr(args, key, None)
+        if value is not None:
+            config[key] = value
+    return config
