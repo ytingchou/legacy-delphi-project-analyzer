@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.0
+
+- Added prompt-pack generation for module transition, query clarification, and unknown resolution.
+- Added failure triage bundles with minimal context and fallback prompts.
+- Added `--target-model` to specialize prompt output for weak or constrained internal LLMs.
+- Extended packaged outputs and regression coverage for prompt and triage artifacts.
+
 ## v0.4.0
 
 - Added validation for `overrides.json` with non-fatal diagnostics for bad keys or types.

@@ -122,6 +122,8 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         "complexity_report": report,
         "transition_mapping": output.transition_mapping,
         "load_bundles": output.load_bundles,
+        "prompt_packs": output.prompt_packs,
+        "failure_triage": output.failure_triage,
         "diagnostic_count": len(output.diagnostics),
     }
     data_json = json.dumps(to_jsonable(payload), ensure_ascii=False)
@@ -130,6 +132,8 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         ("Forms", str(report.total_forms), "UI surfaces"),
         ("Queries", str(report.total_queries), "SQL artifacts"),
         ("Flows", str(report.total_business_flows), "Recovered flows"),
+        ("Prompt Packs", str(len(output.prompt_packs)), "Model-ready tasks"),
+        ("Failure Cases", str(len(output.failure_triage)), "Minimal repro bundles"),
         ("Diagnostics", str(report.total_diagnostics), "Warnings + errors"),
         ("Unresolved", str(report.total_unresolved_placeholders), "Legacy placeholders"),
     ]

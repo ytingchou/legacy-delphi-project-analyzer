@@ -192,6 +192,33 @@ class LoadBundleArtifact:
 
 
 @dataclass(slots=True)
+class PromptPackArtifact:
+    name: str
+    category: str
+    target_model: str
+    objective: str
+    context_paths: list[str] = field(default_factory=list)
+    estimated_tokens: int = 0
+    prompt: str | None = None
+    fallback_prompt: str | None = None
+    expected_response_schema: dict[str, Any] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class FailureTriageArtifact:
+    name: str
+    issue_code: str
+    severity: str
+    summary: str
+    likely_root_cause: str
+    context_paths: list[str] = field(default_factory=list)
+    suggested_prompt: str | None = None
+    fallback_prompt: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ModuleComplexityScore:
     module_name: str
     score: int
@@ -248,6 +275,8 @@ class AnalysisOutput:
     )
     business_flows: list[BusinessFlowArtifact] = field(default_factory=list)
     load_bundles: list[LoadBundleArtifact] = field(default_factory=list)
+    prompt_packs: list[PromptPackArtifact] = field(default_factory=list)
+    failure_triage: list[FailureTriageArtifact] = field(default_factory=list)
     complexity_report: ComplexityReport | None = None
     diagnostics: list[DiagnosticRecord] = field(default_factory=list)
     manifest: list[ArtifactManifestEntry] = field(default_factory=list)

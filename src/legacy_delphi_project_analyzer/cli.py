@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Split Markdown artifacts once they exceed this approximate token budget.",
     )
     analyze_parser.add_argument(
+        "--target-model",
+        default="qwen3-128k",
+        help="Target LLM profile used when generating prompt packs.",
+    )
+    analyze_parser.add_argument(
         "--fail-on-fatal",
         action="store_true",
         help="Exit with a non-zero status if fatal diagnostics are present.",
@@ -76,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         phases=args.phases,
         max_artifact_chars=args.max_artifact_chars,
         max_artifact_tokens=args.max_artifact_tokens,
+        target_model=args.target_model,
     )
 
     fatal_count = len([item for item in output.diagnostics if item.severity == "fatal"])

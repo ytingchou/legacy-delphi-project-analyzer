@@ -26,6 +26,7 @@ def run_analysis(
     phases: list[str] | None = None,
     max_artifact_chars: int = 40000,
     max_artifact_tokens: int = 10000,
+    target_model: str = "qwen3-128k",
 ) -> AnalysisOutput:
     project_root = project_root.resolve()
     output_dir = output_dir.resolve()
@@ -132,6 +133,7 @@ def run_analysis(
             output,
             max_artifact_chars=max_artifact_chars,
             max_artifact_tokens=max_artifact_tokens,
+            target_model=target_model,
         )
 
     return output

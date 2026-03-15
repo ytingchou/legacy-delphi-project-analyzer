@@ -28,6 +28,12 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentry.json").exists())
             self.assertTrue((output_root / "llm-pack" / "load-plan.json").exists())
             self.assertTrue((output_root / "llm-pack" / "boss-summary.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderentrytransition.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderlookupclarify.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "unknowns.md").exists())
+            self.assertTrue(
+                (output_root / "failure-cases" / "orderlookup-unresolved-placeholders.md").exists()
+            )
             self.assertTrue((output_root / "errors" / "prompt-recipes.md").exists())
             self.assertTrue((output_root / "knowledge" / "learned_patterns.json").exists())
             self.assertTrue((output_root / "knowledge" / "suggested_overrides.json").exists())
@@ -35,9 +41,13 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "report" / "index.html").exists())
             self.assertGreaterEqual(len(output.transition_mapping.modules), 1)
             self.assertGreaterEqual(len(output.business_flows), 1)
+            self.assertGreaterEqual(len(output.prompt_packs), 3)
+            self.assertGreaterEqual(len(output.failure_triage), 1)
             self.assertGreaterEqual(len(output.manifest), 5)
             self.assertIsNotNone(output.complexity_report)
             self.assertTrue(any(entry.estimated_tokens > 0 for entry in output.manifest))
+            self.assertTrue(any(entry.kind == "prompt-pack" for entry in output.manifest))
+            self.assertTrue(any(entry.kind == "failure-triage" for entry in output.manifest))
             module_text = (output_root / "llm-pack" / "modules" / "orderentry.md").read_text(
                 encoding="utf-8"
             )
@@ -46,6 +56,10 @@ class PipelineTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("btnSearchClick", flow_text)
+            prompt_text = (output_root / "prompt-pack" / "orderentrytransition.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("React + Spring Boot", prompt_text)
             report_text = (output_root / "report" / "index.html").read_text(encoding="utf-8")
             self.assertIn("Complexity Dashboard", report_text)
 

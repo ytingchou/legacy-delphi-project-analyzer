@@ -17,6 +17,13 @@ from legacy_delphi_project_analyzer.models import (
     ResolvedQueryArtifact,
     TransitionMappingArtifact,
 )
+from legacy_delphi_project_analyzer.prompting import (
+    build_failure_triage,
+    build_prompt_packs,
+    build_unknowns_markdown,
+    render_failure_triage_markdown,
+    render_prompt_pack_markdown,
+)
 from legacy_delphi_project_analyzer.reporting import (
     build_boss_summary_markdown,
     build_web_report_html,
@@ -238,6 +245,7 @@ def package_analysis(
     output: AnalysisOutput,
     max_artifact_chars: int,
     max_artifact_tokens: int,
+    target_model: str,
 ) -> tuple[list[ArtifactManifestEntry], list[LoadBundleArtifact]]:
     if not output.output_dir:
         raise ValueError("output.output_dir must be set before packaging analysis artifacts.")
@@ -357,32 +365,6 @@ def package_analysis(
         _manifest_entry("diagnostics-json", errors_dir / "diagnostics.json", ["diagnostics"])
     )
 
-    if output.complexity_report is not None:
-        boss_summary = build_boss_summary_markdown(output)
-        manifest.extend(
-            _write_chunked_markdown(
-                llm_pack_dir / "boss-summary.md",
-                boss_summary,
-                max_artifact_chars,
-                max_artifact_tokens,
-                kind="boss-summary",
-                tags=["leadership", "summary"],
-                recommended_for=["leadership"],
-            )
-        )
-        write_json(report_dir / "complexity-report.json", output.complexity_report)
-        manifest.append(
-            _manifest_entry(
-                "report-data",
-                report_dir / "complexity-report.json",
-                ["leadership", "report"],
-            )
-        )
-        write_text(report_dir / "index.html", build_web_report_html(output))
-        manifest.append(
-            _manifest_entry("web-report", report_dir / "index.html", ["leadership", "report"])
-        )
-
     for module in output.transition_mapping.modules:
         manifest.extend(
             _write_chunked_markdown(
@@ -477,6 +459,92 @@ def package_analysis(
     manifest.append(
         _manifest_entry("load-plan", llm_pack_dir / "load-plan.json", ["bundle", "load-plan"])
     )
+
+    prompt_pack_dir = output_root / "prompt-pack"
+    ensure_directory(prompt_pack_dir)
+    prompt_packs = build_prompt_packs(output, manifest, load_bundles, target_model=target_model)
+    output.prompt_packs = prompt_packs
+    for prompt_pack in prompt_packs:
+        prompt_path = prompt_pack_dir / f"{slugify(prompt_pack.name)}.md"
+        prompt_json_path = prompt_pack_dir / f"{slugify(prompt_pack.name)}.json"
+        write_text(prompt_path, render_prompt_pack_markdown(prompt_pack))
+        write_json(prompt_json_path, prompt_pack)
+        manifest.append(
+            ArtifactManifestEntry(
+                kind="prompt-pack",
+                path=prompt_path.as_posix(),
+                chars=len(prompt_path.read_text(encoding="utf-8")),
+                estimated_tokens=estimate_tokens(prompt_path.read_text(encoding="utf-8")),
+                tags=["prompt-pack", prompt_pack.category, prompt_pack.target_model],
+                recommended_for=["llm-follow-up", prompt_pack.name],
+            )
+        )
+        manifest.append(
+            _manifest_entry(
+                "prompt-pack-json",
+                prompt_json_path,
+                ["prompt-pack", prompt_pack.category, prompt_pack.target_model],
+            )
+        )
+
+    unknowns_markdown = build_unknowns_markdown(output)
+    write_text(prompt_pack_dir / "unknowns.md", unknowns_markdown)
+    manifest.append(
+        _manifest_entry("unknowns-ledger", prompt_pack_dir / "unknowns.md", ["prompt-pack", "unknowns"])
+    )
+
+    failure_case_dir = output_root / "failure-cases"
+    ensure_directory(failure_case_dir)
+    failure_triage = build_failure_triage(output, manifest, target_model=target_model)
+    output.failure_triage = failure_triage
+    for triage in failure_triage:
+        triage_path = failure_case_dir / f"{slugify(triage.name)}.md"
+        triage_json_path = failure_case_dir / f"{slugify(triage.name)}.json"
+        write_text(triage_path, render_failure_triage_markdown(triage))
+        write_json(triage_json_path, triage)
+        manifest.append(
+            ArtifactManifestEntry(
+                kind="failure-triage",
+                path=triage_path.as_posix(),
+                chars=len(triage_path.read_text(encoding="utf-8")),
+                estimated_tokens=estimate_tokens(triage_path.read_text(encoding="utf-8")),
+                tags=["failure-triage", triage.issue_code, triage.severity],
+                recommended_for=["debugging", triage.name],
+            )
+        )
+        manifest.append(
+            _manifest_entry(
+                "failure-triage-json",
+                triage_json_path,
+                ["failure-triage", triage.issue_code, triage.severity],
+            )
+        )
+
+    if output.complexity_report is not None:
+        boss_summary = build_boss_summary_markdown(output)
+        manifest.extend(
+            _write_chunked_markdown(
+                llm_pack_dir / "boss-summary.md",
+                boss_summary,
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="boss-summary",
+                tags=["leadership", "summary"],
+                recommended_for=["leadership"],
+            )
+        )
+        write_json(report_dir / "complexity-report.json", output.complexity_report)
+        manifest.append(
+            _manifest_entry(
+                "report-data",
+                report_dir / "complexity-report.json",
+                ["leadership", "report"],
+            )
+        )
+        write_text(report_dir / "index.html", build_web_report_html(output))
+        manifest.append(
+            _manifest_entry("web-report", report_dir / "index.html", ["leadership", "report"])
+        )
 
     write_json(llm_pack_dir / "manifest.json", manifest)
     manifest.append(

@@ -16,6 +16,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Static HTML dashboard output plus `serve-report` for local report preview
 - Diagnostics with prompt guidance for unresolved or low-confidence areas
 - Rule-driven knowledge store for reusable overrides, learned patterns, and suggested overrides
+- Prompt-pack generation and failure triage bundles tailored for low-capability 128k-token LLMs
 
 ## Usage
 
@@ -35,6 +36,7 @@ Optional flags:
 - `--rules-dir rules`
 - `--max-artifact-chars 40000`
 - `--max-artifact-tokens 10000`
+- `--target-model qwen3-128k`
 - `--fail-on-fatal`
 
 Serve the generated web report locally:
@@ -43,14 +45,14 @@ Serve the generated web report locally:
 legacy-delphi-analyzer serve-report /path/to/artifacts/report
 ```
 
-## v0.4 Highlights
+## v0.5 Highlights
 
-- `overrides.json` is now validated and bad entries surface as warnings instead
-  of crashing discovery or analysis.
-- The analyzer emits `knowledge-insights.md` and `suggested_overrides.json`
-  to speed up prompt engineering and rule curation.
-- Knowledge artifacts are included in the generated output set so they can be
-  reviewed alongside migration bundles and leadership reports.
+- Each run now emits `prompt-pack/` with model-targeted prompts for module
+  transition, query clarification, and unknown resolution.
+- Unresolved placeholders and hard failures produce `failure-cases/` bundles
+  with minimal context and fallback prompts.
+- Prompt packs now enforce strict JSON response schemas so weaker internal LLMs
+  can work in smaller, more deterministic steps.
 
 ## Override File
 
