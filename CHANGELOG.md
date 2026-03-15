@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.9.1
+
+- Removed SQL XML parameter `data_type` validation so custom types no longer emit warnings.
+- Relaxed SQL XML parameter name parsing so names with or without a leading `:` are accepted.
+- Added regression coverage for mixed parameter-name styles and custom parameter types.
+
 ## v0.9.0
 
 - Added prompt effectiveness scoring from imported feedback, including per-prompt and per-goal success metrics.

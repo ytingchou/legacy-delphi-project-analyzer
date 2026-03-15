@@ -20,7 +20,6 @@ from legacy_delphi_project_analyzer.workspace import workspace_key_for_path
 COMMENT_RE = re.compile(r"(--[^\n]*|/\*.*?\*/)", re.DOTALL)
 DML_RE = re.compile(r"^\s*(insert|update|delete|merge)\b", re.IGNORECASE)
 DUAL_SELECT_RE = re.compile(r"(?is)\bselect\s+:(\w+)\b.*?\bfrom\s+dual\b")
-VALID_DATA_TYPES = {"Int", "Double", "String", "DateTime", "IntArray", "StringArray", "SQL"}
 
 
 def parse_sql_xml_file(
@@ -125,21 +124,10 @@ def _parse_query_element(
 
     for child in list(element):
         if child.tag == "parameter":
-            data_type = child.attrib.get("data_type")
-            if data_type and data_type not in VALID_DATA_TYPES:
-                diagnostics.append(
-                    make_diagnostic(
-                        "warning",
-                        "SQL_XML_UNKNOWN_DATA_TYPE",
-                        f"Unsupported parameter data_type '{data_type}' on '{name}'.",
-                        file_path=path.as_posix(),
-                        suggestion="Use one of the documented SQL XML data types or teach the analyzer how to map this custom type.",
-                    )
-                )
             parameters.append(
                 QueryParameter(
-                    name=(child.attrib.get("name") or "").lstrip(":"),
-                    data_type=data_type,
+                    name=_normalize_parameter_name(child.attrib.get("name")),
+                    data_type=child.attrib.get("data_type"),
                     sample=child.attrib.get("sample"),
                     default=child.attrib.get("default"),
                 )
@@ -256,6 +244,11 @@ def _parse_reference_fragment(
         ),
         diagnostics,
     )
+
+
+def _normalize_parameter_name(raw_name: str | None) -> str:
+    value = (raw_name or "").strip()
+    return value[1:] if value.startswith(":") else value
 
 
 class SqlXmlResolver:

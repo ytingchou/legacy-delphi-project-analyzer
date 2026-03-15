@@ -146,6 +146,42 @@ WHERE status = :status
             self.assertTrue(any("cyclic reference" in artifact.expanded_sql for artifact in artifacts))
             self.assertTrue(any("cycle_chain" in item.details for item in diagnostics))
 
+    def test_parameter_name_is_optional_colon_and_data_type_is_not_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            xml_path = tmp / "params.xml"
+            xml_path.write_text(
+                """<sql-mapping>
+  <main-query name="FlexibleParams">
+    <parameter name="status" data_type="CustomStatusType" />
+    <parameter name=":customerId" data_type="WhateverType" />
+    <sql-body><![CDATA[
+SELECT *
+FROM orders
+WHERE status = :status
+  AND customer_id = :customerId
+    ]]></sql-body>
+  </main-query>
+</sql-mapping>
+""",
+                encoding="utf-8",
+            )
+
+            summary, diagnostics = parse_sql_xml_file(xml_path, tmp)
+            self.assertEqual(diagnostics, [])
+            assert summary is not None
+
+            diagnostics = []
+            resolver = SqlXmlResolver([summary], diagnostics=diagnostics)
+            artifact = resolver.resolve_query(summary.xml_keys[0], "main-query", "flexibleparams", [])
+
+            self.assertEqual(diagnostics, [])
+            self.assertEqual(
+                [item.name for item in artifact.parameter_definitions],
+                ["status", "customerId"],
+            )
+            self.assertEqual(artifact.unresolved_placeholders, [])
+
 
 if __name__ == "__main__":
     unittest.main()
