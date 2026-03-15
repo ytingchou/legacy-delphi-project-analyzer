@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.0
+
+- Added Delphi workspace resolution for external search paths referenced outside the main repo.
+- Added automatic `.dproj` and `.cfg` search-path parsing, plus `--workspace-config`, `--search-path`, and `--path-var`.
+- Added workspace diagnostics, prompt hints, and report coverage for missing or unresolved external repositories such as shared `PDSS_Common` and `PDSS_SQL` roots.
+- Added regression coverage for relative search paths and custom Delphi path variables.
+
 ## v0.5.0
 
 - Added prompt-pack generation for module transition, query clarification, and unknown resolution.

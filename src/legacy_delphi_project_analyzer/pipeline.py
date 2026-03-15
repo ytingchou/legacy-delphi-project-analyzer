@@ -14,6 +14,7 @@ from legacy_delphi_project_analyzer.knowledge import KnowledgeStore
 from legacy_delphi_project_analyzer.models import AnalysisOutput, ProjectInventory
 from legacy_delphi_project_analyzer.reporting import build_complexity_report
 from legacy_delphi_project_analyzer.utils import make_diagnostic
+from legacy_delphi_project_analyzer.workspace import resolve_workspace
 
 
 PHASE_ORDER = ["discover", "parse", "analyze", "package", "learn"]
@@ -23,6 +24,9 @@ def run_analysis(
     project_root: Path,
     output_dir: Path,
     rules_dir: Path | None = None,
+    workspace_config_path: Path | None = None,
+    extra_search_paths: list[str] | None = None,
+    path_variables: dict[str, str] | None = None,
     phases: list[str] | None = None,
     max_artifact_chars: int = 40000,
     max_artifact_tokens: int = 10000,
@@ -31,11 +35,23 @@ def run_analysis(
     project_root = project_root.resolve()
     output_dir = output_dir.resolve()
     phases = _normalize_phases(phases)
-    knowledge = KnowledgeStore(project_root=project_root, rules_dir=rules_dir, output_dir=output_dir)
+    workspace = resolve_workspace(
+        project_root=project_root,
+        extra_search_paths=extra_search_paths,
+        workspace_config_path=workspace_config_path.resolve() if workspace_config_path else None,
+        path_variables=path_variables,
+    )
+    knowledge = KnowledgeStore(
+        project_root=project_root,
+        rules_dir=rules_dir,
+        output_dir=output_dir,
+        scan_roots=workspace.scan_roots,
+    )
     knowledge_diagnostics = knowledge.get_diagnostics()
 
-    inventory = discover_project_files(project_root, knowledge)
+    inventory = discover_project_files(project_root, knowledge, workspace)
     output = AnalysisOutput(inventory=inventory, output_dir=output_dir.as_posix())
+    output.diagnostics.extend(workspace.diagnostics)
     output.diagnostics.extend(knowledge_diagnostics)
 
     if "parse" in phases or "analyze" in phases or "package" in phases or "learn" in phases:
@@ -79,7 +95,7 @@ def run_analysis(
                 )
         for file_path in inventory.xml_files:
             try:
-                summary, diagnostics = parse_sql_xml_file(Path(file_path), project_root)
+                summary, diagnostics = parse_sql_xml_file(Path(file_path), workspace.scan_roots)
                 output.diagnostics.extend(diagnostics)
                 if summary is not None:
                     output.sql_xml_files.append(summary)
@@ -139,38 +155,49 @@ def run_analysis(
     return output
 
 
-def discover_project_files(project_root: Path, knowledge: KnowledgeStore) -> ProjectInventory:
+def discover_project_files(
+    project_root: Path,
+    knowledge: KnowledgeStore,
+    workspace,
+) -> ProjectInventory:
     pas_files: list[str] = []
     dfm_files: list[str] = []
     xml_files: list[str] = []
     other_files: list[str] = []
     total_size_bytes = 0
 
-    for path in project_root.rglob("*"):
-        if not path.is_file():
-            continue
-        if knowledge.should_ignore(path):
-            continue
-        total_size_bytes += path.stat().st_size
-        suffix = path.suffix.lower()
-        normalized = path.as_posix()
-        if suffix == ".pas":
-            pas_files.append(normalized)
-        elif suffix == ".dfm":
-            dfm_files.append(normalized)
-        elif suffix == ".xml":
-            xml_files.append(normalized)
-        else:
-            other_files.append(normalized)
+    for root in workspace.scan_roots:
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if knowledge.should_ignore(path):
+                continue
+            total_size_bytes += path.stat().st_size
+            normalized = path.resolve().as_posix()
+            suffix = path.suffix.lower()
+            if suffix == ".pas":
+                pas_files.append(normalized)
+            elif suffix == ".dfm":
+                dfm_files.append(normalized)
+            elif suffix == ".xml":
+                xml_files.append(normalized)
+            else:
+                other_files.append(normalized)
 
     return ProjectInventory(
         project_root=project_root.as_posix(),
-        total_files=len(pas_files) + len(dfm_files) + len(xml_files) + len(other_files),
+        total_files=len(set(pas_files)) + len(set(dfm_files)) + len(set(xml_files)) + len(set(other_files)),
         total_size_bytes=total_size_bytes,
-        pas_files=sorted(pas_files),
-        dfm_files=sorted(dfm_files),
-        xml_files=sorted(xml_files),
-        other_files=sorted(other_files),
+        scan_roots=[item.as_posix() for item in workspace.scan_roots],
+        external_roots=[item.as_posix() for item in workspace.scan_roots if item != project_root],
+        project_files=workspace.project_files,
+        configured_search_paths=workspace.configured_search_paths,
+        missing_search_paths=workspace.missing_search_paths,
+        unresolved_search_paths=workspace.unresolved_search_paths,
+        pas_files=sorted(set(pas_files)),
+        dfm_files=sorted(set(dfm_files)),
+        xml_files=sorted(set(xml_files)),
+        other_files=sorted(set(other_files)),
     )
 
 

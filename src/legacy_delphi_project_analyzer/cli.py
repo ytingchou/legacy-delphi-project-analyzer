@@ -35,6 +35,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional directory containing overrides.json.",
     )
     analyze_parser.add_argument(
+        "--workspace-config",
+        default=None,
+        help="Optional JSON file defining external scan roots, search paths, and path variables.",
+    )
+    analyze_parser.add_argument(
+        "--search-path",
+        dest="search_paths",
+        action="append",
+        default=[],
+        help="Additional Delphi search path directory to scan. Can be repeated.",
+    )
+    analyze_parser.add_argument(
+        "--path-var",
+        dest="path_vars",
+        action="append",
+        default=[],
+        help="Delphi path variable mapping in NAME=VALUE form. Can be repeated.",
+    )
+    analyze_parser.add_argument(
         "--max-artifact-chars",
         type=int,
         default=40000,
@@ -78,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
         project_root=Path(args.project_root),
         output_dir=Path(args.output_dir),
         rules_dir=Path(args.rules_dir) if args.rules_dir else None,
+        workspace_config_path=Path(args.workspace_config) if args.workspace_config else None,
+        extra_search_paths=args.search_paths,
+        path_variables=_parse_path_variables(args.path_vars),
         phases=args.phases,
         max_artifact_chars=args.max_artifact_chars,
         max_artifact_tokens=args.max_artifact_tokens,
@@ -93,6 +115,13 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(output.pascal_units)} Pascal units, "
         f"{len(output.forms)} forms, "
         f"{len(output.resolved_queries)} resolved queries"
+    )
+    print(
+        "Workspace: "
+        f"{len(output.inventory.scan_roots)} scan roots, "
+        f"{len(output.inventory.external_roots)} external roots, "
+        f"{len(output.inventory.missing_search_paths)} missing paths, "
+        f"{len(output.inventory.unresolved_search_paths)} unresolved paths"
     )
     print(f"Diagnostics: {len(output.diagnostics)} total, {error_count} error, {fatal_count} fatal")
     report_path = Path(output.output_dir) / "report" / "index.html"
@@ -115,3 +144,17 @@ def serve_report(report_dir: Path, host: str, port: int) -> int:
     finally:
         server.server_close()
     return 0
+
+
+def _parse_path_variables(values: list[str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for item in values:
+        if "=" not in item:
+            raise SystemExit(f"Invalid --path-var value '{item}'. Expected NAME=VALUE.")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            raise SystemExit(f"Invalid --path-var value '{item}'. Expected NAME=VALUE.")
+        parsed[key] = value
+    return parsed

@@ -20,8 +20,15 @@ ALLOWED_OVERRIDE_KEYS = {
 
 
 class KnowledgeStore:
-    def __init__(self, project_root: Path, rules_dir: Path | None, output_dir: Path) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        rules_dir: Path | None,
+        output_dir: Path,
+        scan_roots: list[Path] | None = None,
+    ) -> None:
         self.project_root = project_root
+        self.scan_roots = [item.resolve() for item in (scan_roots or [project_root])]
         self.rules_dir = rules_dir
         self.output_dir = output_dir
         self.knowledge_dir = output_dir / "knowledge"
@@ -112,7 +119,7 @@ class KnowledgeStore:
         return list(self.diagnostics)
 
     def should_ignore(self, path: Path) -> bool:
-        relative = path.relative_to(self.project_root).as_posix()
+        relative = self._path_key(path)
         patterns = [
             item
             for item in list(self.overrides.get("ignore_globs", []))
@@ -120,6 +127,18 @@ class KnowledgeStore:
             if isinstance(item, str)
         ]
         return any(fnmatch.fnmatch(relative, pattern) for pattern in patterns)
+
+    def _path_key(self, path: Path) -> str:
+        normalized = path.resolve()
+        for root in self.scan_roots:
+            try:
+                relative = normalized.relative_to(root)
+            except ValueError:
+                continue
+            if root == self.scan_roots[0]:
+                return relative.as_posix()
+            return f"{root.name}/{relative.as_posix()}"
+        return normalized.as_posix()
 
     def apply_module_override(self, candidate: str) -> str:
         module_overrides = self.overrides.get("module_overrides", {})

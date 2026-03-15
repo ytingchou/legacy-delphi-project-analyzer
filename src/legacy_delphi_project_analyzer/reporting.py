@@ -63,7 +63,12 @@ def build_complexity_report(output: AnalysisOutput) -> ComplexityReport:
         avg_module_score
         + len(output.transition_mapping.cross_cutting_concerns) * 5
         + len([item for item in output.diagnostics if item.severity in {"error", "fatal"}]) * 6
-        + min(total_unresolved, 10) * 2,
+        + min(total_unresolved, 10) * 2
+        + min(
+            len(output.inventory.missing_search_paths) + len(output.inventory.unresolved_search_paths),
+            5,
+        )
+        * 4,
     )
     module_scores.sort(key=lambda item: item.score, reverse=True)
     executive_summary = _executive_summary(output, module_scores, project_score)
@@ -132,6 +137,8 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         ("Forms", str(report.total_forms), "UI surfaces"),
         ("Queries", str(report.total_queries), "SQL artifacts"),
         ("Flows", str(report.total_business_flows), "Recovered flows"),
+        ("External Roots", str(len(output.inventory.external_roots)), "Shared legacy repos"),
+        ("Missing Paths", str(len(output.inventory.missing_search_paths)), "Workspace gaps"),
         ("Prompt Packs", str(len(output.prompt_packs)), "Model-ready tasks"),
         ("Failure Cases", str(len(output.failure_triage)), "Minimal repro bundles"),
         ("Diagnostics", str(report.total_diagnostics), "Warnings + errors"),
@@ -450,6 +457,16 @@ def _executive_summary(
         f"Overall migration complexity is {_complexity_level(project_score)} at {project_score}/100.",
         f"The project contains {len(output.forms)} forms, {len(output.resolved_queries)} SQL artifacts, and {len(output.business_flows)} recovered business flows.",
     ]
+    if output.inventory.external_roots:
+        points.append(
+            f"The analyzer depends on {len(output.inventory.external_roots)} external scan roots beyond the main repo."
+        )
+    if output.inventory.missing_search_paths or output.inventory.unresolved_search_paths:
+        points.append(
+            "Workspace path gaps remain: "
+            f"{len(output.inventory.missing_search_paths)} missing and "
+            f"{len(output.inventory.unresolved_search_paths)} unresolved search paths."
+        )
     if module_scores:
         highest = module_scores[0]
         lowest = module_scores[-1]
@@ -491,6 +508,10 @@ def _migration_recommendations(
     if any(item.unresolved_placeholders for item in module_scores):
         recommendations.append(
             "Prioritize documenting Delphi-side placeholder replacement before locking backend API contracts."
+        )
+    if output.inventory.missing_search_paths or output.inventory.unresolved_search_paths:
+        recommendations.append(
+            "Stabilize the Delphi workspace first by resolving external search paths before estimating module-level migration scope."
         )
     if output.diagnostics:
         recommendations.append(

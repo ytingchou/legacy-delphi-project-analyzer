@@ -17,6 +17,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Diagnostics with prompt guidance for unresolved or low-confidence areas
 - Rule-driven knowledge store for reusable overrides, learned patterns, and suggested overrides
 - Prompt-pack generation and failure triage bundles tailored for low-capability 128k-token LLMs
+- Delphi workspace resolution for external XE search paths and shared repos outside the main project root
 
 ## Usage
 
@@ -34,6 +35,9 @@ Optional flags:
 
 - `--phase discover --phase parse --phase analyze --phase package --phase learn`
 - `--rules-dir rules`
+- `--workspace-config workspace.json`
+- `--search-path ../PDSS_Common --search-path ../PDSS_SQL`
+- `--path-var PDSS_COMMON=../PDSS_Common --path-var PDSS_SQL=../PDSS_SQL`
 - `--max-artifact-chars 40000`
 - `--max-artifact-tokens 10000`
 - `--target-model qwen3-128k`
@@ -45,14 +49,55 @@ Serve the generated web report locally:
 legacy-delphi-analyzer serve-report /path/to/artifacts/report
 ```
 
-## v0.5 Highlights
+## External Delphi XE Search Paths
 
-- Each run now emits `prompt-pack/` with model-targeted prompts for module
-  transition, query clarification, and unknown resolution.
-- Unresolved placeholders and hard failures produce `failure-cases/` bundles
-  with minimal context and fallback prompts.
-- Prompt packs now enforce strict JSON response schemas so weaker internal LLMs
-  can work in smaller, more deterministic steps.
+If the Delphi XE project references shared code outside the current repo, the analyzer can now
+scan those roots too. This is the right way to handle layouts such as:
+
+- `main_project/`
+- `../PDSS_Common/`
+- `../PDSS_SQL/`
+
+You can provide external roots directly:
+
+```bash
+legacy-delphi-analyzer analyze /path/to/main_project \
+  --search-path ../PDSS_Common \
+  --search-path ../PDSS_SQL
+```
+
+Or define a workspace config with Delphi-style variables:
+
+```json
+{
+  "scan_roots": ["$(PDSS_COMMON)", "$(PDSS_SQL)"],
+  "search_paths": ["$(PDSS_COMMON)", "$(PDSS_SQL)"],
+  "path_variables": {
+    "PDSS_COMMON": "../PDSS_Common",
+    "PDSS_SQL": "../PDSS_SQL"
+  }
+}
+```
+
+Then run:
+
+```bash
+legacy-delphi-analyzer analyze /path/to/main_project \
+  --workspace-config /path/to/main_project/workspace.json
+```
+
+The analyzer will also read `.dproj` and `.cfg` search paths automatically. If a path is missing
+or a Delphi variable like `$(PDSS_SQL)` is unresolved, the run emits diagnostics, failure triage
+bundles, and prompt-ready hints so a weak internal LLM can still help close the gap.
+
+## v0.6 Highlights
+
+- Each run can resolve external Delphi workspace roots from `.dproj`, `.cfg`,
+  CLI flags, or a `workspace.json` file.
+- Missing or unresolved search paths now appear in diagnostics, `unknowns.md`,
+  failure triage, leadership summaries, and the web report.
+- Shared repositories such as `PDSS_Common` and `PDSS_SQL` can be scanned
+  outside the main project repo without copying them into the same directory.
 
 ## Override File
 

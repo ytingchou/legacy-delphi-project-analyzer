@@ -11,6 +11,13 @@ from legacy_delphi_project_analyzer.models import (
     ResolvedQueryArtifact,
 )
 
+WORKSPACE_TROUBLE_CODES = {
+    "PROJECT_SEARCH_PATH_MISSING",
+    "PROJECT_SEARCH_PATH_UNRESOLVED",
+    "WORKSPACE_CONFIG_NOT_FOUND",
+    "WORKSPACE_CONFIG_INVALID_JSON",
+}
+
 
 def build_prompt_packs(
     output: AnalysisOutput,
@@ -113,7 +120,7 @@ def build_failure_triage(
     triage: list[FailureTriageArtifact] = []
 
     for diagnostic in output.diagnostics:
-        if diagnostic.severity not in {"error", "fatal"}:
+        if diagnostic.severity not in {"error", "fatal"} and diagnostic.code not in WORKSPACE_TROUBLE_CODES:
             continue
         context_paths = list(dict.fromkeys(knowledge_paths))
         issue_name = diagnostic.code.lower().replace("_", "-")
@@ -304,7 +311,7 @@ def _collect_unknowns(output: AnalysisOutput) -> list[str]:
                 f"Query {query.name} unresolved placeholders: {', '.join(query.unresolved_placeholders)}"
             )
     for diagnostic in output.diagnostics:
-        if diagnostic.severity in {"error", "fatal"}:
+        if diagnostic.severity in {"error", "fatal"} or diagnostic.code in WORKSPACE_TROUBLE_CODES:
             unknowns.append(f"{diagnostic.code}: {diagnostic.message}")
     for flow in output.business_flows:
         for step in flow.steps:

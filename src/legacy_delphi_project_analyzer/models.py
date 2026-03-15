@@ -29,6 +29,12 @@ class ProjectInventory:
     project_root: str
     total_files: int
     total_size_bytes: int
+    scan_roots: list[str] = field(default_factory=list)
+    external_roots: list[str] = field(default_factory=list)
+    project_files: list[str] = field(default_factory=list)
+    configured_search_paths: list[str] = field(default_factory=list)
+    missing_search_paths: list[str] = field(default_factory=list)
+    unresolved_search_paths: list[str] = field(default_factory=list)
     pas_files: list[str] = field(default_factory=list)
     dfm_files: list[str] = field(default_factory=list)
     xml_files: list[str] = field(default_factory=list)

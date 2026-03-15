@@ -14,6 +14,7 @@ from legacy_delphi_project_analyzer.models import (
     SqlXmlFileSummary,
 )
 from legacy_delphi_project_analyzer.utils import PLACEHOLDER_RE, make_diagnostic, read_text_file
+from legacy_delphi_project_analyzer.workspace import workspace_key_for_path
 
 
 COMMENT_RE = re.compile(r"(--[^\n]*|/\*.*?\*/)", re.DOTALL)
@@ -22,8 +23,12 @@ DUAL_SELECT_RE = re.compile(r"(?is)\bselect\s+:(\w+)\b.*?\bfrom\s+dual\b")
 VALID_DATA_TYPES = {"Int", "Double", "String", "DateTime", "IntArray", "StringArray", "SQL"}
 
 
-def parse_sql_xml_file(path: Path, project_root: Path) -> tuple[SqlXmlFileSummary | None, list[DiagnosticRecord]]:
+def parse_sql_xml_file(
+    path: Path,
+    workspace_roots: Path | list[Path],
+) -> tuple[SqlXmlFileSummary | None, list[DiagnosticRecord]]:
     diagnostics: list[DiagnosticRecord] = []
+    scan_roots = _normalize_workspace_roots(workspace_roots)
     text, _, decode_failed = read_text_file(path)
     if decode_failed:
         diagnostics.append(
@@ -52,12 +57,9 @@ def parse_sql_xml_file(path: Path, project_root: Path) -> tuple[SqlXmlFileSummar
     if root.tag != "sql-mapping":
         return None, diagnostics
 
-    try:
-        relative_key = path.relative_to(project_root).as_posix().lower()
-    except ValueError:
-        relative_key = path.name.lower()
+    relative_key = workspace_key_for_path(path, scan_roots).lower()
     xml_keys = list(
-        OrderedDict.fromkeys([relative_key, path.name.lower(), path.stem.lower()])
+        OrderedDict.fromkeys([relative_key, path.name.lower(), path.stem.lower(), path.resolve().as_posix().lower()])
     )
     summary = SqlXmlFileSummary(file_path=path.as_posix(), xml_keys=xml_keys)
 
@@ -102,6 +104,12 @@ def parse_sql_xml_file(path: Path, project_root: Path) -> tuple[SqlXmlFileSummar
             summary.sub_queries.append(query)
 
     return summary, diagnostics
+
+
+def _normalize_workspace_roots(workspace_roots: Path | list[Path]) -> list[Path]:
+    if isinstance(workspace_roots, Path):
+        return [workspace_roots.resolve()]
+    return [item.resolve() for item in workspace_roots]
 
 
 def _parse_query_element(

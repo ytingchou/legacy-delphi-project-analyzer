@@ -634,6 +634,16 @@ def _build_project_summary(output: AnalysisOutput) -> str:
 - Business flows: {len(output.business_flows)}
 - Diagnostics: {len(output.diagnostics)} total, {len(severe)} severe
 
+## Workspace Coverage
+
+- Scan roots: {len(output.inventory.scan_roots)}
+- External roots: {len(output.inventory.external_roots)}
+- Project files parsed for search paths: {len(output.inventory.project_files)}
+- Configured search paths found: {len(output.inventory.configured_search_paths)}
+- Missing search paths: {len(output.inventory.missing_search_paths)}
+- Unresolved search paths: {len(output.inventory.unresolved_search_paths)}
+- External root list: {", ".join(output.inventory.external_roots) or "None"}
+
 ## Recommended LLM Load Order
 
 1. `project-summary.md`
