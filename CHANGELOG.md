@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.0
+
+- Added formal module-level transition specs with readiness scores, migration strategies, recommended first slices, React page proposals, Spring endpoint proposals, and DTO suggestions.
+- Added packaged transition spec artifacts under `llm-pack/transition-specs/` plus `intermediate/transition_specs.json`.
+- Added `validate_transition_spec` prompt packs so low-capability LLMs can verify generated specs against recovered evidence before implementation.
+- Extended management reporting and the static web dashboard with transition readiness and first-slice visibility.
+- Added feedback learning for validated transition specs and regression coverage for transition spec generation.
+
 ## v0.10.0
 
 - Added direct OpenAI-compatible LLM execution with the new `run-llm` CLI command.

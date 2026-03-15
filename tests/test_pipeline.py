@@ -25,10 +25,14 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "llm-pack" / "modules" / "orderentry.md").exists())
             self.assertTrue((output_root / "llm-pack" / "queries" / "orderlookup.md").exists())
             self.assertTrue((output_root / "llm-pack" / "flows" / "orderentry-flow.md").exists())
+            self.assertTrue(
+                (output_root / "llm-pack" / "transition-specs" / "orderentry-transition-spec.md").exists()
+            )
             self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentry.json").exists())
             self.assertTrue((output_root / "llm-pack" / "load-plan.json").exists())
             self.assertTrue((output_root / "llm-pack" / "boss-summary.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderentrytransition.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderentryspecvalidate.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderlookupclarify.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderlookupintent.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "closure-summary.md").exists())
@@ -47,8 +51,10 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "knowledge" / "suggested_overrides.json").exists())
             self.assertTrue((output_root / "knowledge" / "knowledge-insights.md").exists())
             self.assertTrue((output_root / "report" / "index.html").exists())
+            self.assertTrue((output_root / "intermediate" / "transition_specs.json").exists())
             self.assertGreaterEqual(len(output.transition_mapping.modules), 1)
             self.assertGreaterEqual(len(output.business_flows), 1)
+            self.assertGreaterEqual(len(output.transition_specs), 1)
             self.assertGreaterEqual(len(output.prompt_packs), 3)
             self.assertGreaterEqual(len(output.failure_triage), 1)
             self.assertGreaterEqual(len(output.manifest), 5)
@@ -64,17 +70,32 @@ class PipelineTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("btnSearchClick", flow_text)
+            spec_text = (
+                output_root / "llm-pack" / "transition-specs" / "orderentry-transition-spec.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("GET /api/order-entry/order-lookup", spec_text)
+            self.assertIn("customerId", spec_text)
+            self.assertIn("OrderEntryOrderLookupRequest", spec_text)
             prompt_text = (output_root / "prompt-pack" / "orderentrytransition.md").read_text(
                 encoding="utf-8"
             )
             self.assertIn("React + Spring Boot", prompt_text)
             self.assertIn("Verification Prompt", prompt_text)
+            spec_prompt_text = (output_root / "prompt-pack" / "orderentryspecvalidate.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("validate_transition_spec", spec_prompt_text)
             prompt_json = (output_root / "prompt-pack" / "orderlookupclarify.json").read_text(
                 encoding="utf-8"
             )
             self.assertIn("infer_placeholder_meaning", prompt_json)
+            transition_specs_json = (
+                output_root / "intermediate" / "transition_specs.json"
+            ).read_text(encoding="utf-8")
+            self.assertIn("\"readiness_level\": \"needs-clarification\"", transition_specs_json)
             report_text = (output_root / "report" / "index.html").read_text(encoding="utf-8")
             self.assertIn("Complexity Dashboard", report_text)
+            self.assertIn("Transition Specs", report_text)
 
     def test_pipeline_handles_binary_dfm_project(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

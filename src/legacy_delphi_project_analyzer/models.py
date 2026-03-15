@@ -266,6 +266,66 @@ class PromptEffectivenessReport:
 
 
 @dataclass(slots=True)
+class TransitionFieldSpec:
+    name: str
+    data_type: str = "string"
+    required: bool = False
+    source_evidence: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ReactPageSpec:
+    name: str
+    route_path: str
+    purpose: str
+    components: list[str] = field(default_factory=list)
+    inputs: list[TransitionFieldSpec] = field(default_factory=list)
+    actions: list[str] = field(default_factory=list)
+    data_dependencies: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class SpringEndpointSpec:
+    name: str
+    method: str
+    path: str
+    purpose: str
+    query_artifacts: list[str] = field(default_factory=list)
+    request_dto: str | None = None
+    response_dto: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class DtoSpec:
+    name: str
+    kind: str
+    fields: list[TransitionFieldSpec] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class TransitionSpecArtifact:
+    module_name: str
+    readiness_score: int
+    readiness_level: str
+    user_goal: str
+    migration_strategy: str
+    recommended_first_slice: str
+    frontend_pages: list[ReactPageSpec] = field(default_factory=list)
+    backend_endpoints: list[SpringEndpointSpec] = field(default_factory=list)
+    dtos: list[DtoSpec] = field(default_factory=list)
+    supporting_queries: list[str] = field(default_factory=list)
+    cross_cutting_concerns: list[str] = field(default_factory=list)
+    key_assumptions: list[str] = field(default_factory=list)
+    open_questions: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LlmRunArtifact:
     run_id: str
     artifact_kind: str
@@ -345,6 +405,7 @@ class AnalysisOutput:
         default_factory=TransitionMappingArtifact
     )
     business_flows: list[BusinessFlowArtifact] = field(default_factory=list)
+    transition_specs: list[TransitionSpecArtifact] = field(default_factory=list)
     load_bundles: list[LoadBundleArtifact] = field(default_factory=list)
     prompt_packs: list[PromptPackArtifact] = field(default_factory=list)
     failure_triage: list[FailureTriageArtifact] = field(default_factory=list)

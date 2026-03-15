@@ -182,6 +182,11 @@ def _infer_rules(prompt_meta: dict[str, Any], response: Any) -> dict[str, Any]:
         next_step = response.get("next_smallest_step")
         if isinstance(module_name, str) and module_name and isinstance(next_step, str) and next_step:
             rules["transition_hints"][module_name] = next_step
+    elif goal == "validate_transition_spec":
+        module_name = response.get("module_name") if isinstance(response.get("module_name"), str) else subject
+        revised_slice = response.get("revised_first_slice")
+        if isinstance(module_name, str) and module_name and isinstance(revised_slice, str) and revised_slice:
+            rules["transition_hints"][module_name] = revised_slice
     elif goal == "summarize_form_behavior":
         behavior = response.get("likely_behavior")
         if isinstance(behavior, str) and behavior and isinstance(subject, str) and subject:

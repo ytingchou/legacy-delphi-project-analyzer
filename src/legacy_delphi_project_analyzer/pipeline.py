@@ -8,6 +8,7 @@ from legacy_delphi_project_analyzer.analyzers.sql_xml import SqlXmlResolver, par
 from legacy_delphi_project_analyzer.artifacts import (
     build_business_flows,
     build_transition_mapping,
+    build_transition_specs,
     package_analysis,
 )
 from legacy_delphi_project_analyzer.knowledge import KnowledgeStore, load_bootstrap_rules
@@ -143,6 +144,12 @@ def run_analysis(
             output.pascal_units,
             output.forms,
             output.transition_mapping,
+            output.resolved_queries,
+        )
+        output.transition_specs = build_transition_specs(
+            output.transition_mapping,
+            output.business_flows,
+            output.forms,
             output.resolved_queries,
         )
         output.complexity_report = build_complexity_report(output)

@@ -21,6 +21,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Prompt closure artifacts with verification prompts, acceptance checks, and minimal repro bundles
 - Feedback learning plus prompt-effectiveness scoring for management reporting
 - Direct OpenAI-compatible LLM execution with configurable token limits
+- Module-level transition spec generation with React pages, Spring endpoints, DTOs, readiness scores, and first-slice recommendations
 
 ## Usage
 
@@ -72,6 +73,26 @@ legacy-delphi-analyzer run-llm /path/to/artifacts \
 
 This writes run outputs under `artifacts/llm-runs/`, including a feedback template JSON
 that can be edited and passed to `ingest-feedback`.
+
+## v1.0 Transition Specs
+
+`analyze` now emits a formal transition spec for each inferred module under:
+
+- `llm-pack/transition-specs/`
+- `intermediate/transition_specs.json`
+
+Each spec includes:
+
+- Readiness score and readiness level
+- Recommended first migration slice
+- React page proposals with routes, inputs, actions, and data dependencies
+- Spring Boot endpoint proposals with HTTP methods and paths
+- DTO suggestions derived from SQL parameters, select lists, and DFM inputs
+- Assumptions, risks, and cross-cutting concerns
+
+Prompt packs now also include `*SpecValidate` artifacts so your internal weak LLM can
+check whether the generated transition spec is still grounded in the available evidence
+before the team starts implementing React or Spring code.
 
 ## External Delphi XE Search Paths
 
@@ -139,6 +160,9 @@ will load it. Supported keys:
   },
   "query_hints": {
     "OrderLookup": "Used by price-check screen before submitting manual overrides"
+  },
+  "transition_hints": {
+    "OrderEntry": "Implement the read-only search slice before any write path."
   }
 }
 ```

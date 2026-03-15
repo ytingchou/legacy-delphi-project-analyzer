@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from pathlib import Path
+import re
 
 from legacy_delphi_project_analyzer.models import (
     AnalysisOutput,
@@ -10,12 +11,17 @@ from legacy_delphi_project_analyzer.models import (
     BusinessFlowStep,
     BusinessModuleArtifact,
     DiagnosticRecord,
+    DtoSpec,
     FormSummary,
     LoadBundleArtifact,
     PascalMethodFlow,
     PascalUnitSummary,
+    ReactPageSpec,
     ResolvedQueryArtifact,
+    SpringEndpointSpec,
+    TransitionFieldSpec,
     TransitionMappingArtifact,
+    TransitionSpecArtifact,
 )
 from legacy_delphi_project_analyzer.feedback import (
     build_prompt_effectiveness_report,
@@ -253,6 +259,72 @@ def build_business_flows(
     return flows
 
 
+def build_transition_specs(
+    transition_mapping: TransitionMappingArtifact,
+    business_flows: list[BusinessFlowArtifact],
+    forms: list[FormSummary],
+    resolved_queries: list[ResolvedQueryArtifact],
+) -> list[TransitionSpecArtifact]:
+    flow_by_module = {item.module_name: item for item in business_flows}
+    form_by_name = {item.root_name: item for item in forms if item.root_name}
+    query_by_name = {item.name: item for item in resolved_queries}
+    specs: list[TransitionSpecArtifact] = []
+
+    for module in transition_mapping.modules:
+        flow = flow_by_module.get(module.name)
+        module_forms = [
+            form_by_name[form_name]
+            for form_name in module.forms
+            if form_name and form_name in form_by_name
+        ]
+        module_queries = [
+            query_by_name[query_name]
+            for query_name in module.query_artifacts
+            if query_name in query_by_name
+        ]
+        user_goal = _infer_module_user_goal(module, module_forms, flow, module_queries)
+        frontend_pages = _build_frontend_specs(module, module_forms, flow, module_queries, user_goal)
+        backend_endpoints, dtos = _build_backend_specs(module, module_queries, frontend_pages)
+        readiness_score = _compute_transition_readiness(module, flow, module_queries)
+        readiness_level = _transition_readiness_level(readiness_score)
+        cross_cutting = _module_cross_cutting_concerns(module, flow, module_queries, transition_mapping)
+        specs.append(
+            TransitionSpecArtifact(
+                module_name=module.name,
+                readiness_score=readiness_score,
+                readiness_level=readiness_level,
+                user_goal=user_goal,
+                migration_strategy=_build_migration_strategy(module, flow, module_queries, readiness_level),
+                recommended_first_slice=_build_first_slice(
+                    module,
+                    frontend_pages,
+                    backend_endpoints,
+                    module_queries,
+                    readiness_level,
+                ),
+                frontend_pages=frontend_pages,
+                backend_endpoints=backend_endpoints,
+                dtos=dtos,
+                supporting_queries=[query.name for query in module_queries],
+                cross_cutting_concerns=cross_cutting,
+                key_assumptions=_build_key_assumptions(module, flow, module_queries),
+                open_questions=module.open_questions,
+                risks=module.risks,
+                notes=list(
+                    dict.fromkeys(
+                        module.notes
+                        + (flow.recommendations[:3] if flow else [])
+                        + [
+                            f"React candidates: {', '.join(module.react_candidates) or 'None'}",
+                            f"Spring candidates: {', '.join(module.spring_candidates) or 'None'}",
+                        ]
+                    )
+                ),
+            )
+        )
+    return specs
+
+
 def package_analysis(
     output: AnalysisOutput,
     max_artifact_chars: int,
@@ -304,6 +376,7 @@ def package_analysis(
     write_json(intermediate_dir / "resolved_queries.json", output.resolved_queries)
     write_json(intermediate_dir / "transition_mapping.json", output.transition_mapping)
     write_json(intermediate_dir / "business_flows.json", output.business_flows)
+    write_json(intermediate_dir / "transition_specs.json", output.transition_specs)
     if output.complexity_report is not None:
         write_json(intermediate_dir / "complexity_report.json", output.complexity_report)
 
@@ -322,6 +395,11 @@ def package_analysis(
                 "business-flows",
                 intermediate_dir / "business_flows.json",
                 ["flow", "transition"],
+            ),
+            _manifest_entry(
+                "transition-specs",
+                intermediate_dir / "transition_specs.json",
+                ["transition", "spec"],
             ),
         ]
     )
@@ -400,6 +478,19 @@ def package_analysis(
                 kind="business-flow",
                 tags=["flow", flow.module_name],
                 recommended_for=[flow.module_name],
+            )
+        )
+
+    for spec in output.transition_specs:
+        manifest.extend(
+            _write_chunked_markdown(
+                llm_pack_dir / "transition-specs" / f"{slugify(spec.module_name)}-transition-spec.md",
+                _build_transition_spec_markdown(spec),
+                max_artifact_chars,
+                max_artifact_tokens,
+                kind="transition-spec",
+                tags=["transition-spec", spec.module_name, spec.readiness_level],
+                recommended_for=[spec.module_name, "transition-spec"],
             )
         )
 
@@ -745,6 +836,10 @@ def _build_project_summary(output: AnalysisOutput) -> str:
         module.name
         for module in sorted(output.transition_mapping.modules, key=lambda item: item.confidence)
     )
+    readiness_summary = ", ".join(
+        f"{item.module_name}:{item.readiness_level}"
+        for item in sorted(output.transition_specs, key=lambda item: item.readiness_score, reverse=True)[:6]
+    ) or "No transition specs generated"
     return f"""# Project Summary
 
 ## Overview
@@ -755,6 +850,7 @@ def _build_project_summary(output: AnalysisOutput) -> str:
 - SQL XML files: {len(output.sql_xml_files)}
 - Resolved queries: {len(output.resolved_queries)}
 - Business flows: {len(output.business_flows)}
+- Transition specs: {len(output.transition_specs)}
 - Diagnostics: {len(output.diagnostics)} total, {len(severe)} severe
 
 ## Workspace Coverage
@@ -771,7 +867,7 @@ def _build_project_summary(output: AnalysisOutput) -> str:
 
 1. `project-summary.md`
 2. `load-plan.json`
-3. The target module dossier and business flow artifact
+3. The target module dossier, transition spec, and business flow artifact
 4. Only the query artifacts listed by that module bundle
 5. `diagnostics.md` and `prompt-recipes.md` for unresolved context
 
@@ -782,6 +878,10 @@ def _build_project_summary(output: AnalysisOutput) -> str:
 ## Suggested Migration Order
 
 {migration_order or "No modules inferred"}
+
+## Transition Readiness
+
+- {readiness_summary}
 
 ## Top Risks
 
@@ -832,6 +932,94 @@ def _build_module_dossier(module: BusinessModuleArtifact) -> str:
 
 {_bullet_lines(module.notes)}
 """
+
+
+def _build_transition_spec_markdown(spec: TransitionSpecArtifact) -> str:
+    parts = [
+        f"# Transition Spec: {spec.module_name}",
+        "",
+        "## Readiness",
+        "",
+        f"- Readiness: {spec.readiness_level.upper()} ({spec.readiness_score}/100)",
+        f"- User goal: {spec.user_goal}",
+        f"- Migration strategy: {spec.migration_strategy}",
+        f"- Recommended first slice: {spec.recommended_first_slice}",
+        "",
+        "## Frontend Pages",
+        "",
+    ]
+    if not spec.frontend_pages:
+        parts.append("- None")
+    for page in spec.frontend_pages:
+        parts.extend(
+            [
+                f"### {page.name}",
+                f"- Route: `{page.route_path}`",
+                f"- Purpose: {page.purpose}",
+                f"- Components: {', '.join(page.components) or 'None'}",
+                f"- Actions: {', '.join(page.actions) or 'None'}",
+                f"- Data dependencies: {', '.join(page.data_dependencies) or 'None'}",
+                "- Inputs:",
+                _field_bullets(page.inputs),
+                f"- Notes: {'; '.join(page.notes) or 'None'}",
+                "",
+            ]
+        )
+    parts.extend(["## Backend Endpoints", ""])
+    if not spec.backend_endpoints:
+        parts.append("- None")
+    for endpoint in spec.backend_endpoints:
+        parts.extend(
+            [
+                f"### {endpoint.name}",
+                f"- Method: `{endpoint.method}`",
+                f"- Path: `{endpoint.path}`",
+                f"- Purpose: {endpoint.purpose}",
+                f"- Query artifacts: {', '.join(endpoint.query_artifacts) or 'None'}",
+                f"- Request DTO: {endpoint.request_dto or 'None'}",
+                f"- Response DTO: {endpoint.response_dto or 'None'}",
+                f"- Notes: {'; '.join(endpoint.notes) or 'None'}",
+                "",
+            ]
+        )
+    parts.extend(["## DTOs", ""])
+    if not spec.dtos:
+        parts.append("- None")
+    for dto in spec.dtos:
+        parts.extend(
+            [
+                f"### {dto.name}",
+                f"- Kind: {dto.kind}",
+                _field_bullets(dto.fields),
+                f"- Notes: {'; '.join(dto.notes) or 'None'}",
+                "",
+            ]
+        )
+    parts.extend(
+        [
+            "## Assumptions",
+            "",
+            _bullet_lines(spec.key_assumptions),
+            "",
+            "## Cross-Cutting Concerns",
+            "",
+            _bullet_lines(spec.cross_cutting_concerns),
+            "",
+            "## Open Questions",
+            "",
+            _bullet_lines(spec.open_questions),
+            "",
+            "## Risks",
+            "",
+            _bullet_lines(spec.risks),
+            "",
+            "## Notes",
+            "",
+            _bullet_lines(spec.notes),
+            "",
+        ]
+    )
+    return "\n".join(parts)
 
 
 def _build_business_flow_artifact(flow: BusinessFlowArtifact) -> str:
@@ -932,7 +1120,7 @@ def _build_prompt_recipes(output: AnalysisOutput) -> str:
         "## Use When The Analyzer Fails",
         "",
         "1. Feed `project-summary.md` and `load-plan.json` first.",
-        "2. Add the relevant module dossier and business flow artifact.",
+        "2. Add the relevant module dossier, transition spec, and business flow artifact.",
         "3. Add only the linked query artifacts if the problem involves SQL XML expansion.",
         "4. Include the exact diagnostic block and ask the LLM to propose either a rule override or parser extension.",
         "",
@@ -1015,7 +1203,7 @@ def _build_load_bundles(
                 artifact_paths=artifact_paths,
                 estimated_tokens=estimated,
                 recommended_prompt=(
-                    f"Load the project summary, then the {module.name} module dossier, its business flow artifact, "
+                    f"Load the project summary, then the {module.name} module dossier, transition spec, business flow artifact, "
                     "and only the listed query artifacts before proposing React/Spring migration steps."
                 ),
                 notes=[
@@ -1048,6 +1236,7 @@ def _build_load_plan(
         "cross_cutting_concerns": output.transition_mapping.cross_cutting_concerns,
         "notes": [
             "Prefer the smallest module bundle that still covers the target business flow.",
+            "Use the transition spec before asking the LLM to expand into detailed React or Spring implementation tasks.",
             "Only add diagnostics when the current artifacts leave a concrete unanswered question.",
         ],
     }
@@ -1163,3 +1352,548 @@ def _bullet_lines(values: list[str]) -> str:
     if not values:
         return "- None"
     return "\n".join(f"- {value}" for value in values)
+
+
+def _field_bullets(fields: list[TransitionFieldSpec]) -> str:
+    if not fields:
+        return "- None"
+    lines = []
+    for field in fields:
+        evidence = ", ".join(field.source_evidence) or "None"
+        lines.append(
+            f"- `{field.name}` ({field.data_type}, required={str(field.required).lower()}): evidence={evidence}"
+        )
+    return "\n".join(lines)
+
+
+def _infer_module_user_goal(
+    module: BusinessModuleArtifact,
+    forms: list[FormSummary],
+    flow: BusinessFlowArtifact | None,
+    queries: list[ResolvedQueryArtifact],
+) -> str:
+    captions = [caption for form in forms for caption in form.captions if caption]
+    if captions:
+        base = captions[0]
+    else:
+        base = re.sub(r"(?<!^)(?=[A-Z])", " ", module.name).strip()
+    if queries and all(query.expanded_sql.strip().lower().startswith("select") for query in queries):
+        return f"Search and review {base.lower()} data."
+    if any(query.expanded_sql.strip().lower().startswith(("insert", "update", "delete", "merge")) for query in queries):
+        return f"Maintain and update {base.lower()} records."
+    if flow and flow.steps:
+        return f"Execute the {base.lower()} workflow from the legacy form in a web surface."
+    return f"Expose the {base.lower()} capability through React and Spring Boot."
+
+
+def _build_frontend_specs(
+    module: BusinessModuleArtifact,
+    forms: list[FormSummary],
+    flow: BusinessFlowArtifact | None,
+    queries: list[ResolvedQueryArtifact],
+    user_goal: str,
+) -> list[ReactPageSpec]:
+    if not forms:
+        return [
+            ReactPageSpec(
+                name=module.react_candidates[0] if module.react_candidates else f"{module.name}Page",
+                route_path=f"/{_kebab_case(module.name)}",
+                purpose=user_goal,
+                components=module.react_candidates[1:],
+                actions=_fallback_actions(flow),
+                data_dependencies=[query.name for query in queries],
+                notes=["No DFM form was linked directly; page shape is derived from Pascal and SQL heuristics."],
+            )
+        ]
+
+    pages: list[ReactPageSpec] = []
+    for index, form in enumerate(forms):
+        candidate_name = (
+            module.react_candidates[min(index, len(module.react_candidates) - 1)]
+            if module.react_candidates
+            else f"{module.name}Page"
+        )
+        route_path = f"/{_kebab_case(module.name)}"
+        if len(forms) > 1:
+            route_path = f"{route_path}/{_kebab_case(form.root_name or str(index + 1))}"
+        pages.append(
+            ReactPageSpec(
+                name=candidate_name,
+                route_path=route_path,
+                purpose=user_goal,
+                components=_react_component_candidates(module, form),
+                inputs=_extract_form_inputs(form, queries),
+                actions=_extract_form_actions(form, flow),
+                data_dependencies=_page_data_dependencies(form, flow, queries),
+                notes=_page_notes(form, flow),
+            )
+        )
+    return pages
+
+
+def _build_backend_specs(
+    module: BusinessModuleArtifact,
+    queries: list[ResolvedQueryArtifact],
+    pages: list[ReactPageSpec],
+) -> tuple[list[SpringEndpointSpec], list[DtoSpec]]:
+    endpoints: list[SpringEndpointSpec] = []
+    dto_map: dict[str, DtoSpec] = {}
+    page_input_fields = [field for page in pages for field in page.inputs]
+
+    if not queries:
+        fallback_request = f"{module.name}ActionRequest"
+        dto_map[fallback_request] = DtoSpec(
+            name=fallback_request,
+            kind="request",
+            fields=_dedupe_fields(page_input_fields),
+            notes=["Built from form inputs because no SQL XML query was attached to this module."],
+        )
+        endpoints.append(
+            SpringEndpointSpec(
+                name=f"{module.name}Controller",
+                method="POST",
+                path=f"/api/{_kebab_case(module.name)}/actions",
+                purpose=f"Handle the first web slice for module {module.name}.",
+                request_dto=fallback_request,
+                response_dto=None,
+                notes=["Replace this endpoint once the concrete legacy operation is confirmed."],
+            )
+        )
+        return endpoints, list(dto_map.values())
+
+    for query in queries:
+        method = _http_method_for_query(query)
+        request_name = f"{module.name}{query.name}Request"
+        response_name = (
+            f"{module.name}{query.name}Row"
+            if method == "GET"
+            else f"{module.name}{query.name}Result"
+        )
+        request_fields = _request_fields_for_query(query, page_input_fields)
+        response_fields = _response_fields_for_query(query)
+        dto_map[request_name] = DtoSpec(
+            name=request_name,
+            kind="request",
+            fields=request_fields,
+            notes=[f"Derived from query {query.name} parameters and linked form inputs."],
+        )
+        if response_fields:
+            dto_map[response_name] = DtoSpec(
+                name=response_name,
+                kind="response",
+                fields=response_fields,
+                notes=[f"Derived from the SELECT list or SQL result shape of query {query.name}."],
+            )
+        endpoint_path = f"/api/{_kebab_case(module.name)}/{_kebab_case(query.name)}"
+        endpoints.append(
+            SpringEndpointSpec(
+                name=f"{module.name}{query.name}Endpoint",
+                method=method,
+                path=endpoint_path,
+                purpose=_endpoint_purpose(module, query),
+                query_artifacts=[query.name],
+                request_dto=request_name if request_fields else None,
+                response_dto=response_name if response_fields else None,
+                notes=_endpoint_notes(query),
+            )
+        )
+    return endpoints, list(dto_map.values())
+
+
+def _compute_transition_readiness(
+    module: BusinessModuleArtifact,
+    flow: BusinessFlowArtifact | None,
+    queries: list[ResolvedQueryArtifact],
+) -> int:
+    score = 82 if module.confidence == "high" else 68 if module.confidence == "medium" else 54
+    if not flow or not flow.steps:
+        score -= 12
+    score -= len(module.risks) * 7
+    score -= len(module.open_questions) * 4
+    score -= sum(len(query.unresolved_placeholders) for query in queries) * 5
+    if not queries:
+        score -= 8
+    if any("Binary DFM" in risk for risk in module.risks):
+        score -= 8
+    return max(5, min(95, score))
+
+
+def _transition_readiness_level(score: int) -> str:
+    if score >= 75:
+        return "ready"
+    if score >= 50:
+        return "needs-clarification"
+    return "blocked"
+
+
+def _module_cross_cutting_concerns(
+    module: BusinessModuleArtifact,
+    flow: BusinessFlowArtifact | None,
+    queries: list[ResolvedQueryArtifact],
+    transition_mapping: TransitionMappingArtifact,
+) -> list[str]:
+    concerns: list[str] = []
+    if any(len(query.source_trace) > 1 for query in queries):
+        concerns.append("SQL XML composition")
+    if any(query.unresolved_placeholders for query in queries):
+        concerns.append("Legacy string replacement")
+    if flow and any(step.called_methods for step in flow.steps):
+        concerns.append("Legacy multi-step handler flow")
+    concerns.extend(
+        concern
+        for concern in transition_mapping.cross_cutting_concerns
+        if concern not in concerns
+        and (
+            concern == "SQL XML composition"
+            or concern == "Legacy string replacement"
+        )
+    )
+    return concerns
+
+
+def _build_migration_strategy(
+    module: BusinessModuleArtifact,
+    flow: BusinessFlowArtifact | None,
+    queries: list[ResolvedQueryArtifact],
+    readiness_level: str,
+) -> str:
+    if not queries:
+        return "Stabilize the UI behavior first, then define one thin Spring endpoint for the first confirmed action."
+    has_reads = any(query.expanded_sql.strip().lower().startswith("select") for query in queries)
+    has_writes = any(
+        query.expanded_sql.strip().lower().startswith(("insert", "update", "delete", "merge"))
+        for query in queries
+    )
+    if has_reads and has_writes:
+        strategy = "Split the module into read APIs backed by a QueryFacade and write APIs backed by a CommandService."
+    elif has_reads:
+        strategy = "Start with a read-only React page and a Spring QueryFacade, then layer mutations only after the search flow is stable."
+    else:
+        strategy = "Start from the command path, expose one bounded Spring write endpoint, and add a React confirmation flow around it."
+    if readiness_level != "ready":
+        strategy += " Keep the first slice narrow until the unresolved placeholders and missing handlers are clarified."
+    if flow and not flow.steps:
+        strategy += " Recover at least one business flow before broadening the scope."
+    return strategy
+
+
+def _build_first_slice(
+    module: BusinessModuleArtifact,
+    pages: list[ReactPageSpec],
+    endpoints: list[SpringEndpointSpec],
+    queries: list[ResolvedQueryArtifact],
+    readiness_level: str,
+) -> str:
+    page_name = pages[0].name if pages else f"{module.name}Page"
+    endpoint = endpoints[0] if endpoints else None
+    if endpoint and queries:
+        sentence = (
+            f"Implement `{page_name}` with `{endpoint.method} {endpoint.path}` backed by query `{queries[0].name}` "
+            "before expanding to other handlers."
+        )
+    elif endpoint:
+        sentence = f"Implement `{page_name}` and a single endpoint `{endpoint.method} {endpoint.path}` as the first migration slice."
+    else:
+        sentence = f"Implement `{page_name}` as a shell page and confirm the first backend contract from the legacy flow."
+    if readiness_level != "ready":
+        sentence += " Do not expand the slice until the listed open questions are answered."
+    return sentence
+
+
+def _build_key_assumptions(
+    module: BusinessModuleArtifact,
+    flow: BusinessFlowArtifact | None,
+    queries: list[ResolvedQueryArtifact],
+) -> list[str]:
+    assumptions: list[str] = []
+    if queries:
+        assumptions.append("Each SQL XML artifact can be mapped to one Spring endpoint before deeper refactoring.")
+    if flow and flow.steps:
+        assumptions.append("Recovered DFM events represent the primary user path for the first web slice.")
+    if any(query.unresolved_placeholders for query in queries):
+        assumptions.append("Placeholder semantics must be confirmed before finalizing DTO validation rules.")
+    if not module.forms:
+        assumptions.append("The module may behave as a service/helper rather than a user-facing page.")
+    return assumptions
+
+
+def _react_component_candidates(module: BusinessModuleArtifact, form: FormSummary) -> list[str]:
+    component_names = []
+    if form.datasets:
+        component_names.append(f"{module.name}DataGrid")
+    if any(component.events for component in form.components):
+        component_names.append(f"{module.name}ActionBar")
+    if any(
+        component.component_type.lower().endswith(("edit", "combobox", "lookupcombobox"))
+        for component in form.components
+    ):
+        component_names.append(f"{module.name}FilterForm")
+    component_names.extend(module.react_candidates[1:])
+    return list(dict.fromkeys(component_names))
+
+
+def _extract_form_inputs(
+    form: FormSummary,
+    queries: list[ResolvedQueryArtifact],
+) -> list[TransitionFieldSpec]:
+    fields: list[TransitionFieldSpec] = []
+    for component in form.components:
+        if not _is_input_component(component.component_type):
+            continue
+        field_name = component.properties.get("DataField") or component.name
+        fields.append(
+            TransitionFieldSpec(
+                name=_camel_case(field_name),
+                data_type="string",
+                required=False,
+                source_evidence=[f"{form.root_name or Path(form.file_path).stem}:{component.name}"],
+                notes=[component.component_type],
+            )
+        )
+    for query in queries:
+        for parameter in query.parameter_definitions:
+            fields.append(
+                TransitionFieldSpec(
+                    name=_camel_case(parameter.name),
+                    data_type=_map_data_type(parameter.data_type),
+                    required=True,
+                    source_evidence=[query.name],
+                )
+            )
+    return _dedupe_fields(fields)
+
+
+def _extract_form_actions(
+    form: FormSummary,
+    flow: BusinessFlowArtifact | None,
+) -> list[str]:
+    actions = []
+    for component in form.components:
+        if "button" in component.component_type.lower():
+            caption = component.properties.get("Caption")
+            handler = component.events.get("OnClick")
+            actions.append(caption or handler or component.name)
+    if flow:
+        actions.extend(step.trigger for step in flow.steps if step.trigger != "pascal-method")
+    return list(dict.fromkeys(item for item in actions if item))
+
+
+def _page_data_dependencies(
+    form: FormSummary,
+    flow: BusinessFlowArtifact | None,
+    queries: list[ResolvedQueryArtifact],
+) -> list[str]:
+    dependencies = [query.name for query in queries]
+    if flow:
+        dependencies.extend(query_name for step in flow.steps for query_name in step.queries)
+    if form.datasets:
+        dependencies.extend(form.datasets)
+    return list(dict.fromkeys(item for item in dependencies if item))
+
+
+def _page_notes(form: FormSummary, flow: BusinessFlowArtifact | None) -> list[str]:
+    notes = []
+    if form.captions:
+        notes.append(f"Legacy caption: {', '.join(form.captions[:2])}")
+    if form.datasets:
+        notes.append(f"Datasets: {', '.join(form.datasets)}")
+    if flow and flow.unlinked_queries:
+        notes.append(f"Unlinked queries still need mapping: {', '.join(flow.unlinked_queries)}")
+    return notes
+
+
+def _fallback_actions(flow: BusinessFlowArtifact | None) -> list[str]:
+    if not flow:
+        return []
+    return [step.trigger for step in flow.steps if step.trigger]
+
+
+def _http_method_for_query(query: ResolvedQueryArtifact) -> str:
+    sql = query.expanded_sql.strip().lower()
+    if sql.startswith("select"):
+        return "GET"
+    if sql.startswith("insert"):
+        return "POST"
+    if sql.startswith("update"):
+        return "PUT"
+    if sql.startswith("delete"):
+        return "DELETE"
+    if sql.startswith("merge"):
+        return "POST"
+    return "POST"
+
+
+def _request_fields_for_query(
+    query: ResolvedQueryArtifact,
+    page_input_fields: list[TransitionFieldSpec],
+) -> list[TransitionFieldSpec]:
+    fields: list[TransitionFieldSpec] = []
+    input_by_name = {field.name.lower(): field for field in page_input_fields}
+    declared = {parameter.name for parameter in query.parameter_definitions}
+    placeholder_names = list(declared) + [item for item in query.discovered_placeholders if item not in declared]
+    for placeholder in placeholder_names:
+        field_name = _camel_case(placeholder)
+        source_field = input_by_name.get(field_name.lower())
+        fields.append(
+            TransitionFieldSpec(
+                name=field_name,
+                data_type=_parameter_type_for_query(query, placeholder),
+                required=True,
+                source_evidence=list(
+                    dict.fromkeys(
+                        [query.name] + (source_field.source_evidence if source_field else [])
+                    )
+                ),
+                notes=(source_field.notes if source_field else []),
+            )
+        )
+    return _dedupe_fields(fields)
+
+
+def _response_fields_for_query(query: ResolvedQueryArtifact) -> list[TransitionFieldSpec]:
+    sql = query.expanded_sql.strip()
+    if not sql.lower().startswith("select"):
+        return [
+            TransitionFieldSpec(
+                name="status",
+                data_type="string",
+                required=True,
+                source_evidence=[query.name],
+            ),
+            TransitionFieldSpec(
+                name="affectedRows",
+                data_type="number",
+                required=False,
+                source_evidence=[query.name],
+            ),
+        ]
+    columns = _extract_select_columns(sql)
+    return [
+        TransitionFieldSpec(
+            name=_camel_case(column),
+            data_type="string",
+            required=False,
+            source_evidence=[query.name],
+        )
+        for column in columns
+    ]
+
+
+def _endpoint_purpose(module: BusinessModuleArtifact, query: ResolvedQueryArtifact) -> str:
+    sql = query.expanded_sql.strip().lower()
+    if sql.startswith("select"):
+        return f"Return data for the {module.name} web slice using query {query.name}."
+    if sql.startswith(("insert", "update", "delete", "merge")):
+        return f"Execute the {module.name} command path using query {query.name}."
+    return f"Bridge query {query.name} into the {module.name} Spring service layer."
+
+
+def _endpoint_notes(query: ResolvedQueryArtifact) -> list[str]:
+    notes = []
+    if query.unresolved_placeholders:
+        notes.append(
+            "Validate unresolved placeholders before finalizing controller validation: "
+            + ", ".join(query.unresolved_placeholders)
+        )
+    if len(query.source_trace) > 1:
+        notes.append("Query SQL is composed from multiple SQL XML fragments.")
+    return notes
+
+
+def _parameter_type_for_query(query: ResolvedQueryArtifact, placeholder: str) -> str:
+    for parameter in query.parameter_definitions:
+        if parameter.name.lower() == placeholder.lower():
+            return _map_data_type(parameter.data_type)
+    return "string"
+
+
+def _map_data_type(value: str | None) -> str:
+    mapping = {
+        "int": "number",
+        "double": "number",
+        "string": "string",
+        "datetime": "datetime",
+        "intarray": "number[]",
+        "stringarray": "string[]",
+        "sql": "string",
+    }
+    if not value:
+        return "string"
+    return mapping.get(value.lower(), value)
+
+
+def _extract_select_columns(sql: str) -> list[str]:
+    match = re.search(r"\bselect\b(?P<select>.*?)\bfrom\b", sql, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return []
+    select_clause = match.group("select")
+    columns: list[str] = []
+    for item in _split_sql_list(select_clause):
+        candidate = item.strip()
+        if not candidate or candidate == "*":
+            continue
+        alias_match = re.search(r"\bas\s+([A-Za-z0-9_]+)$", candidate, re.IGNORECASE)
+        if alias_match:
+            columns.append(alias_match.group(1))
+            continue
+        trailing = re.search(r"([A-Za-z0-9_]+)$", candidate)
+        if trailing:
+            columns.append(trailing.group(1))
+    return list(dict.fromkeys(columns))
+
+
+def _split_sql_list(value: str) -> list[str]:
+    items: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in value:
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth > 0:
+            depth -= 1
+        if char == "," and depth == 0:
+            items.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    if current:
+        items.append("".join(current))
+    return items
+
+
+def _dedupe_fields(fields: list[TransitionFieldSpec]) -> list[TransitionFieldSpec]:
+    deduped: dict[str, TransitionFieldSpec] = {}
+    for field in fields:
+        key = field.name.lower()
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = field
+            continue
+        existing.required = existing.required or field.required
+        existing.source_evidence = list(dict.fromkeys(existing.source_evidence + field.source_evidence))
+        existing.notes = list(dict.fromkeys(existing.notes + field.notes))
+    return list(deduped.values())
+
+
+def _is_input_component(component_type: str) -> bool:
+    lowered = component_type.lower()
+    return any(token in lowered for token in ("edit", "combo", "lookup", "date", "mask"))
+
+
+def _camel_case(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9]+", " ", value.replace(":", " ")).strip()
+    if not cleaned:
+        return "value"
+    parts = [item for item in cleaned.replace("_", " ").split() if item]
+    if len(parts) == 1:
+        part = parts[0]
+        return part[0].lower() + part[1:] if part else "value"
+    head, *tail = parts
+    return head.lower() + "".join(item[:1].upper() + item[1:].lower() for item in tail)
+
+
+def _kebab_case(value: str) -> str:
+    normalized = re.sub(r"(?<!^)(?=[A-Z])", "-", value).replace("_", "-")
+    normalized = re.sub(r"[^A-Za-z0-9-]+", "-", normalized)
+    normalized = re.sub(r"-{2,}", "-", normalized)
+    return normalized.strip("-").lower() or "module"

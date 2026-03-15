@@ -169,6 +169,43 @@ WHERE status = :status
             )
             self.assertIn(external_sql.resolve().as_posix(), output_2.inventory.external_roots)
 
+    def test_transition_spec_feedback_updates_transition_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = run_analysis(
+                project_root=FIXTURE_ROOT,
+                output_dir=Path(tmpdir) / "artifacts",
+                phases=["all"],
+            )
+            feedback_path = Path(tmpdir) / "transition-spec-feedback.json"
+            feedback_path.write_text(
+                json.dumps(
+                    {
+                        "entries": [
+                            {
+                                "prompt_name": "OrderEntrySpecValidate",
+                                "status": "accepted",
+                                "response": {
+                                    "module_name": "OrderEntry",
+                                    "revised_first_slice": "Implement OrderEntryPage plus GET /api/order-entry/order-lookup before any write path.",
+                                },
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            ingest_feedback(Path(output.output_dir), feedback_path)
+            accepted_rules = json.loads(
+                (Path(output.output_dir) / "knowledge" / "accepted_rules.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                accepted_rules["transition_hints"]["OrderEntry"],
+                "Implement OrderEntryPage plus GET /api/order-entry/order-lookup before any write path.",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

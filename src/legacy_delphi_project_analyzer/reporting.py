@@ -93,6 +93,16 @@ def build_boss_summary_markdown(output: AnalysisOutput) -> str:
     if report is None:
         raise ValueError("output.complexity_report must be set before building the boss summary.")
     top_modules = report.module_scores[:5]
+    ready_specs = [
+        item for item in output.transition_specs if item.readiness_level == "ready"
+    ]
+    blocked_specs = [
+        item for item in output.transition_specs if item.readiness_level == "blocked"
+    ]
+    first_slices = [
+        f"{item.module_name}: {item.recommended_first_slice}"
+        for item in sorted(output.transition_specs, key=lambda value: value.readiness_score, reverse=True)[:3]
+    ]
     prompt_report = output.prompt_effectiveness_report
     prompt_summary = (
         _bullet_lines(prompt_report.management_summary)
@@ -119,6 +129,16 @@ def build_boss_summary_markdown(output: AnalysisOutput) -> str:
 
 {_bullet_lines([f"{item.module_name}: {item.level} ({item.score}/100)" for item in top_modules])}
 
+## Transition Readiness
+
+- Ready modules: {len(ready_specs)}
+- Blocked modules: {len(blocked_specs)}
+- Transition specs generated: {len(output.transition_specs)}
+
+## First Slices
+
+{_bullet_lines(first_slices)}
+
 ## Recommended Migration Strategy
 
 {_bullet_lines(report.migration_recommendations)}
@@ -136,6 +156,7 @@ def build_web_report_html(output: AnalysisOutput) -> str:
     payload = {
         "complexity_report": report,
         "transition_mapping": output.transition_mapping,
+        "transition_specs": output.transition_specs,
         "load_bundles": output.load_bundles,
         "prompt_packs": output.prompt_packs,
         "failure_triage": output.failure_triage,
@@ -148,6 +169,12 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         ("Forms", str(report.total_forms), "UI surfaces"),
         ("Queries", str(report.total_queries), "SQL artifacts"),
         ("Flows", str(report.total_business_flows), "Recovered flows"),
+        ("Transition Specs", str(len(output.transition_specs)), "Module-ready plans"),
+        (
+            "Ready Modules",
+            str(len([item for item in output.transition_specs if item.readiness_level == 'ready'])),
+            "Low-friction first slices",
+        ),
         ("External Roots", str(len(output.inventory.external_roots)), "Shared legacy repos"),
         ("Missing Paths", str(len(output.inventory.missing_search_paths)), "Workspace gaps"),
         ("Prompt Packs", str(len(output.prompt_packs)), "Model-ready tasks"),
@@ -198,6 +225,18 @@ def build_web_report_html(output: AnalysisOutput) -> str:
     )
     leadership_points = "\n".join(
         f"<li>{escape(item)}</li>" for item in report.executive_summary
+    )
+    transition_spec_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.module_name)}</td>
+          <td><span class="level level-{_readiness_badge(item.readiness_level)}">{escape(item.readiness_level.upper())}</span></td>
+          <td>{item.readiness_score}</td>
+          <td>{escape(item.migration_strategy)}</td>
+          <td>{escape(item.recommended_first_slice)}</td>
+        </tr>
+        """
+        for item in sorted(output.transition_specs, key=lambda value: value.readiness_score, reverse=True)
     )
     prompt_effectiveness = output.prompt_effectiveness_report
     prompt_rows = ""
@@ -461,6 +500,28 @@ def build_web_report_html(output: AnalysisOutput) -> str:
 
       <section class="panel stack">
         <div>
+          <h2>Transition Specs</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Readiness</th>
+                  <th>Score</th>
+                  <th>Strategy</th>
+                  <th>First Slice</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transition_spec_rows or '<tr><td colspan="5">No transition specs generated yet.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel stack">
+        <div>
           <h2>LLM Work Bundles</h2>
           <div class="bundle-grid">
             {bundle_cards}
@@ -567,6 +628,11 @@ def _executive_summary(
             points.append(
                 f"The most practical first migration slice is {lowest.module_name} ({lowest.score}/100) if business priority allows it."
             )
+    if output.transition_specs:
+        best_ready = max(output.transition_specs, key=lambda item: item.readiness_score)
+        points.append(
+            f"The strongest transition candidate today is {best_ready.module_name} ({best_ready.readiness_level}, {best_ready.readiness_score}/100)."
+        )
     if output.transition_mapping.cross_cutting_concerns:
         points.append(
             "Cross-cutting legacy concerns still visible: "
@@ -603,6 +669,11 @@ def _migration_recommendations(
         recommendations.append(
             "Use diagnostics and prompt recipes as a required review gate before estimating delivery dates."
         )
+    ready_specs = [item for item in output.transition_specs if item.readiness_level == "ready"]
+    if ready_specs:
+        recommendations.append(
+            f"Use the generated transition spec for {ready_specs[0].module_name} as the baseline template for later modules."
+        )
     return recommendations
 
 
@@ -622,3 +693,12 @@ def _bullet_lines(values: list[str]) -> str:
     if not values:
         return "- None"
     return "\n".join(f"- {item}" for item in values)
+
+
+def _readiness_badge(value: str) -> str:
+    mapping = {
+        "ready": "low",
+        "needs-clarification": "medium",
+        "blocked": "high",
+    }
+    return mapping.get(value, "critical")

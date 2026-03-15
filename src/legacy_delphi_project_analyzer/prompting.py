@@ -78,6 +78,61 @@ def build_prompt_packs(
             )
         )
 
+    for spec in output.transition_specs:
+        raw_context = list(
+            dict.fromkeys(
+                [
+                    entry.path
+                    for entry in manifest
+                    if spec.module_name in entry.recommended_for or "project-overview" in entry.recommended_for
+                ]
+                + knowledge_paths[:2]
+            )
+        )
+        context_paths = _select_context_paths(
+            raw_context,
+            path_to_tokens,
+            max_tokens=profile["max_tokens"],
+            max_paths=profile["max_paths"],
+        )
+        packs.append(
+            PromptPackArtifact(
+                name=f"{spec.module_name}SpecValidate",
+                category="transition-spec-validation",
+                goal="validate_transition_spec",
+                target_model=target_model,
+                objective=f"Validate that the generated transition spec for module {spec.module_name} stays inside the available legacy evidence.",
+                subject_name=spec.module_name,
+                issue_summary=(
+                    f"Transition spec for module {spec.module_name} should be checked against recovered flows, SQL, and diagnostics "
+                    f"before implementation planning. Readiness is {spec.readiness_level} ({spec.readiness_score}/100)."
+                ),
+                context_paths=context_paths,
+                estimated_tokens=_sum_tokens(context_paths, path_to_tokens),
+                context_budget_tokens=profile["max_tokens"],
+                prompt=_transition_spec_validation_prompt(spec.module_name),
+                fallback_prompt=_transition_spec_validation_fallback_prompt(spec.module_name),
+                verification_prompt=_transition_spec_validation_verification_prompt(spec.module_name),
+                expected_response_schema={
+                    "module_name": "string",
+                    "supported_pages": ["string"],
+                    "supported_endpoints": ["string"],
+                    "unsupported_items": ["string"],
+                    "remaining_unknowns": ["string"],
+                    "revised_first_slice": "string",
+                },
+                acceptance_checks=[
+                    "Every supported page or endpoint must exist in the attached transition spec.",
+                    "Unsupported items are tied to a specific evidence gap.",
+                    "The revised first slice stays smaller or equal in scope to the current one.",
+                ],
+                notes=[
+                    f"Readiness: {spec.readiness_level} ({spec.readiness_score}/100)",
+                    spec.recommended_first_slice,
+                ],
+            )
+        )
+
     for query in output.resolved_queries:
         if not (query.unresolved_placeholders or query.warnings):
             continue
@@ -807,6 +862,29 @@ def _flow_summary_verification_prompt(module_name: str, handler: str) -> str:
         f"Verify the behavior summary for handler {handler} in module {module_name}.\n"
         "Check that each claimed behavior is supported by the form structure or linked queries.\n"
         "Return strict JSON with keys: supported_behaviors, unsupported_behaviors, missing_evidence."
+    )
+
+
+def _transition_spec_validation_prompt(module_name: str) -> str:
+    return (
+        f"Validate the generated React + Spring Boot transition spec for module {module_name}.\n"
+        "Use only the attached module dossier, transition spec, business flow artifact, query artifacts, and diagnostics.\n"
+        "Return strict JSON with keys: module_name, supported_pages, supported_endpoints, unsupported_items, remaining_unknowns, revised_first_slice."
+    )
+
+
+def _transition_spec_validation_fallback_prompt(module_name: str) -> str:
+    return (
+        f"For module {module_name}, do not redesign the transition spec.\n"
+        "Only list which pages and endpoints are clearly supported, which are not, and the one smallest first slice that is safest to implement next."
+    )
+
+
+def _transition_spec_validation_verification_prompt(module_name: str) -> str:
+    return (
+        f"Verify the spec validation result for module {module_name}.\n"
+        "Check that unsupported items are tied to a concrete evidence gap and that the revised first slice is still bounded.\n"
+        "Return strict JSON with keys: verified_supported_items, verified_unsupported_items, verified_first_slice."
     )
 
 
