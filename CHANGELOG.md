@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.0
+
+- Added runtime orchestration artifacts including `run-state.json`, `blocking-unknowns.json`, `artifact-completeness.json`, and per-phase summaries under `runtime/phases/`.
+- Added `run-phases` and `phase-status` CLI commands to turn a normal analysis run into a resumable multi-phase workflow.
+- Added automatic handoff manifest generation under `llm-pack/handoff-manifest.json`.
+- Added regression coverage for runtime orchestration outputs and CLI integration.
+
 ## v1.0.0
 
 - Added formal module-level transition specs with readiness scores, migration strategies, recommended first slices, React page proposals, Spring endpoint proposals, and DTO suggestions.

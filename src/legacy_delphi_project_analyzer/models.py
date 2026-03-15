@@ -414,6 +414,12 @@ class AnalysisOutput:
     feedback_log: list[dict[str, Any]] = field(default_factory=list)
     diagnostics: list[DiagnosticRecord] = field(default_factory=list)
     manifest: list[ArtifactManifestEntry] = field(default_factory=list)
+    runtime_state: Any | None = None
+    phase_states: list[Any] = field(default_factory=list)
+    blocking_unknowns: list[Any] = field(default_factory=list)
+    artifact_completeness: Any | None = None
+    loop_metrics: Any | None = None
+    taskpacks: list[Any] = field(default_factory=list)
     output_dir: str | None = None
 
 

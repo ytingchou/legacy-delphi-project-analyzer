@@ -22,6 +22,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Feedback learning plus prompt-effectiveness scoring for management reporting
 - Direct OpenAI-compatible LLM execution with configurable token limits
 - Module-level transition spec generation with React pages, Spring endpoints, DTOs, readiness scores, and first-slice recommendations
+- Runtime orchestration outputs for multi-phase loops, blocker queues, and resumable handoff state
 
 ## Usage
 
@@ -35,6 +36,14 @@ Or after installation:
 legacy-delphi-analyzer analyze /path/to/project --output-dir artifacts
 ```
 
+To generate runtime phase state for later LLM loops:
+
+```bash
+legacy-delphi-analyzer run-phases /path/to/project \
+  --output-dir artifacts \
+  --model-profile qwen3_128k_weak
+```
+
 Optional flags:
 
 - `--phase discover --phase parse --phase analyze --phase package --phase learn`
@@ -45,7 +54,14 @@ Optional flags:
 - `--max-artifact-chars 40000`
 - `--max-artifact-tokens 10000`
 - `--target-model qwen3-128k`
+- `--model-profile qwen3_128k_weak`
 - `--fail-on-fatal`
+
+Inspect the current runtime phase state:
+
+```bash
+legacy-delphi-analyzer phase-status /path/to/artifacts
+```
 
 Serve the generated web report locally:
 
@@ -93,6 +109,20 @@ Each spec includes:
 Prompt packs now also include `*SpecValidate` artifacts so your internal weak LLM can
 check whether the generated transition spec is still grounded in the available evidence
 before the team starts implementing React or Spring code.
+
+## Runtime Orchestration
+
+`run-phases` emits a resumable runtime workspace under `artifacts/runtime/`, including:
+
+- `run-state.json`
+- `blocking-unknowns.json`
+- `artifact-completeness.json`
+- `state-summary.md`
+- `phase-delta.md`
+- `phases/<phase>/phase-status.json`
+- `phases/<phase>/phase-summary.md`
+
+This is the foundation for the later agent loop, Cline subagent task packs, and auto-compact LLM orchestration workflow.
 
 ## External Delphi XE Search Paths
 

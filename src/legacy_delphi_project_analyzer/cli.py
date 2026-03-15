@@ -7,6 +7,12 @@ from pathlib import Path
 
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.llm import run_llm_artifact
+from legacy_delphi_project_analyzer.orchestrator import (
+    build_analysis_config,
+    load_runtime_bundle,
+    refresh_runtime_artifacts,
+    run_phases,
+)
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
 
 
@@ -18,65 +24,35 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     analyze_parser = subparsers.add_parser("analyze", help="Run the analyzer on a project root.")
-    analyze_parser.add_argument("project_root", help="Path to the Delphi project root.")
+    _add_analysis_arguments(analyze_parser)
     analyze_parser.add_argument(
-        "--phase",
-        dest="phases",
-        action="append",
-        choices=[*PHASE_ORDER, "all"],
-        help="Limit execution to one or more phases. Defaults to all phases.",
+        "--model-profile",
+        default="qwen3_128k_weak",
+        help="Runtime LLM profile label stored for later loop/task-pack generation.",
     )
-    analyze_parser.add_argument(
-        "--output-dir",
-        default="artifacts",
-        help="Directory where analysis outputs will be written.",
+
+    phase_runner_parser = subparsers.add_parser(
+        "run-phases",
+        help="Run analysis and emit runtime phase orchestration artifacts.",
     )
-    analyze_parser.add_argument(
-        "--rules-dir",
-        default=None,
-        help="Optional directory containing overrides.json.",
+    _add_analysis_arguments(phase_runner_parser)
+    phase_runner_parser.add_argument(
+        "--model-profile",
+        default="qwen3_128k_weak",
+        help="Runtime LLM profile label stored for orchestration and later loop commands.",
     )
-    analyze_parser.add_argument(
-        "--workspace-config",
-        default=None,
-        help="Optional JSON file defining external scan roots, search paths, and path variables.",
+    phase_runner_parser.add_argument(
+        "--dispatch-mode",
+        choices=["manual", "provider", "cline"],
+        default="manual",
+        help="Dispatch mode recorded in runtime state for later loop execution.",
     )
-    analyze_parser.add_argument(
-        "--search-path",
-        dest="search_paths",
-        action="append",
-        default=[],
-        help="Additional Delphi search path directory to scan. Can be repeated.",
+
+    phase_status_parser = subparsers.add_parser(
+        "phase-status",
+        help="Read runtime phase orchestration files from an analysis output directory.",
     )
-    analyze_parser.add_argument(
-        "--path-var",
-        dest="path_vars",
-        action="append",
-        default=[],
-        help="Delphi path variable mapping in NAME=VALUE form. Can be repeated.",
-    )
-    analyze_parser.add_argument(
-        "--max-artifact-chars",
-        type=int,
-        default=40000,
-        help="Split Markdown artifacts once they exceed this size.",
-    )
-    analyze_parser.add_argument(
-        "--max-artifact-tokens",
-        type=int,
-        default=10000,
-        help="Split Markdown artifacts once they exceed this approximate token budget.",
-    )
-    analyze_parser.add_argument(
-        "--target-model",
-        default="qwen3-128k",
-        help="Target LLM profile used when generating prompt packs.",
-    )
-    analyze_parser.add_argument(
-        "--fail-on-fatal",
-        action="store_true",
-        help="Exit with a non-zero status if fatal diagnostics are present.",
-    )
+    phase_status_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
 
     report_parser = subparsers.add_parser(
         "serve-report", help="Serve a generated HTML report directory locally."
@@ -142,6 +118,68 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_analysis_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("project_root", help="Path to the Delphi project root.")
+    parser.add_argument(
+        "--phase",
+        dest="phases",
+        action="append",
+        choices=[*PHASE_ORDER, "all"],
+        help="Limit execution to one or more phases. Defaults to all phases.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="artifacts",
+        help="Directory where analysis outputs will be written.",
+    )
+    parser.add_argument(
+        "--rules-dir",
+        default=None,
+        help="Optional directory containing overrides.json.",
+    )
+    parser.add_argument(
+        "--workspace-config",
+        default=None,
+        help="Optional JSON file defining external scan roots, search paths, and path variables.",
+    )
+    parser.add_argument(
+        "--search-path",
+        dest="search_paths",
+        action="append",
+        default=[],
+        help="Additional Delphi search path directory to scan. Can be repeated.",
+    )
+    parser.add_argument(
+        "--path-var",
+        dest="path_vars",
+        action="append",
+        default=[],
+        help="Delphi path variable mapping in NAME=VALUE form. Can be repeated.",
+    )
+    parser.add_argument(
+        "--max-artifact-chars",
+        type=int,
+        default=40000,
+        help="Split Markdown artifacts once they exceed this size.",
+    )
+    parser.add_argument(
+        "--max-artifact-tokens",
+        type=int,
+        default=10000,
+        help="Split Markdown artifacts once they exceed this approximate token budget.",
+    )
+    parser.add_argument(
+        "--target-model",
+        default="qwen3-128k",
+        help="Target LLM profile used when generating prompt packs.",
+    )
+    parser.add_argument(
+        "--fail-on-fatal",
+        action="store_true",
+        help="Exit with a non-zero status if fatal diagnostics are present.",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -191,21 +229,83 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Feedback template: {result.feedback_template_path}")
         return 0
-    if args.command != "analyze":
+    if args.command == "phase-status":
+        bundle = load_runtime_bundle(Path(args.analysis_dir))
+        run_state = bundle["run_state"]
+        phase_states = bundle["phase_states"]
+        blockers = bundle["blocking_unknowns"]
+        completeness = bundle["artifact_completeness"]
+        if run_state is None:
+            raise SystemExit(f"Runtime state does not exist under {Path(args.analysis_dir) / 'runtime'}")
+        print(f"Run ID: {run_state.run_id}")
+        print(
+            f"Runtime: status={run_state.status}, phase={run_state.current_phase}, "
+            f"loop={run_state.loop_iteration}, model_profile={run_state.target_model_profile}"
+        )
+        if completeness is not None:
+            print(
+                f"Artifacts: {completeness.completed_count}/{completeness.required_count} required artifacts complete"
+            )
+        print(f"Blockers: {len(blockers)}")
+        for phase_state in phase_states:
+            print(
+                f"- {phase_state.phase}: {phase_state.status}, completion={phase_state.completion_score}/100, "
+                f"blockers={len(phase_state.blockers)}"
+            )
+        return 0
+    if args.command not in {"analyze", "run-phases"}:
         parser.error("Unsupported command")
 
-    output = run_analysis(
+    path_variables = _parse_path_variables(args.path_vars)
+    rules_dir = Path(args.rules_dir) if args.rules_dir else None
+    workspace_config_path = Path(args.workspace_config) if args.workspace_config else None
+    analysis_config = build_analysis_config(
         project_root=Path(args.project_root),
         output_dir=Path(args.output_dir),
-        rules_dir=Path(args.rules_dir) if args.rules_dir else None,
-        workspace_config_path=Path(args.workspace_config) if args.workspace_config else None,
+        rules_dir=rules_dir,
+        workspace_config_path=workspace_config_path,
         extra_search_paths=args.search_paths,
-        path_variables=_parse_path_variables(args.path_vars),
+        path_variables=path_variables,
         phases=args.phases,
         max_artifact_chars=args.max_artifact_chars,
         max_artifact_tokens=args.max_artifact_tokens,
         target_model=args.target_model,
     )
+
+    if args.command == "run-phases":
+        output = run_phases(
+            project_root=Path(args.project_root),
+            output_dir=Path(args.output_dir),
+            rules_dir=rules_dir,
+            workspace_config_path=workspace_config_path,
+            extra_search_paths=args.search_paths,
+            path_variables=path_variables,
+            phases=args.phases,
+            max_artifact_chars=args.max_artifact_chars,
+            max_artifact_tokens=args.max_artifact_tokens,
+            target_model=args.target_model,
+            target_model_profile=args.model_profile,
+            dispatch_mode=args.dispatch_mode,
+        )
+    else:
+        output = run_analysis(
+            project_root=Path(args.project_root),
+            output_dir=Path(args.output_dir),
+            rules_dir=rules_dir,
+            workspace_config_path=workspace_config_path,
+            extra_search_paths=args.search_paths,
+            path_variables=path_variables,
+            phases=args.phases,
+            max_artifact_chars=args.max_artifact_chars,
+            max_artifact_tokens=args.max_artifact_tokens,
+            target_model=args.target_model,
+        )
+        refresh_runtime_artifacts(
+            output,
+            target_model_profile=args.model_profile,
+            dispatch_mode="manual",
+            analysis_config=analysis_config,
+        )
 
     fatal_count = len([item for item in output.diagnostics if item.severity == "fatal"])
     error_count = len([item for item in output.diagnostics if item.severity == "error"])
@@ -228,6 +328,9 @@ def main(argv: list[str] | None = None) -> int:
     report_path = Path(output.output_dir) / "report" / "index.html"
     if report_path.exists():
         print(f"Web report: {report_path}")
+    runtime_path = Path(output.output_dir) / "runtime" / "run-state.json"
+    if runtime_path.exists():
+        print(f"Runtime state: {runtime_path}")
     return 1 if args.fail_on_fatal and fatal_count else 0
 
 
