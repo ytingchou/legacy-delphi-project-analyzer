@@ -25,6 +25,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Compact BFF SQL logic artifacts for Spring Boot + Oracle 19c implementation handoff
 - Runtime orchestration outputs for multi-phase loops, blocker queues, and resumable handoff state
 - Qwen3-oriented model profiles, task packs, and file-based Cline inbox/outbox integration
+- Response validators, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
 
 ## Usage
 
@@ -69,6 +70,23 @@ Build blocker task packs for Cline or later loop execution:
 
 ```bash
 legacy-delphi-analyzer build-taskpacks /path/to/artifacts --max-tasks 5
+```
+
+Validate one task response against its schema and the recovered legacy evidence:
+
+```bash
+legacy-delphi-analyzer validate-response /path/to/artifacts task-query-orderlookup-placeholders
+```
+
+Run or resume the bounded orchestration loop:
+
+```bash
+legacy-delphi-analyzer run-loop /path/to/artifacts \
+  --dispatch-mode cline \
+  --max-loops 5
+
+legacy-delphi-analyzer resume-loop /path/to/artifacts --max-loops 5
+legacy-delphi-analyzer loop-status /path/to/artifacts
 ```
 
 Dispatch one task pack into the file-based Cline inbox:
@@ -224,6 +242,57 @@ Built-in model profiles currently include:
 
 The file-based Cline adapter writes requests to `artifacts/runtime/cline-inbox/<task-id>/request.json`
 and reads responses from `artifacts/runtime/cline-outbox/<task-id>/response.json`.
+
+## Response Validation And Agent Loop
+
+The analyzer can now validate task output before learning from it. Validation combines:
+
+- strict JSON/schema checks
+- evidence checks against known modules, queries, pages, endpoints, DTOs, and feature dirs
+
+Accepted or warning-level responses are written into `runtime/validation-results.json`, while
+the bounded loop can keep iterating through blockers one task at a time.
+
+The loop also writes:
+
+- `runtime/loop-state.json`
+- `runtime/loop-summary.md`
+- `runtime/task-history.json`
+- `runtime/task-attempts.json`
+- `runtime/trusted-facts.json`
+
+This keeps weak `qwen3`-class models scoped to one blocker, one prompt, and one compact context bundle at a time.
+
+## Auto-Compact Task Contexts
+
+Every loop task can now emit:
+
+- `runtime/taskpacks/<task-id>/compiled-context.md`
+- `runtime/taskpacks/<task-id>/compiled-context.json`
+- `runtime/taskpacks/<task-id>/taskpack-compiled.json`
+
+These compact files are meant for weak models and later Cline subagents. They reduce context to:
+
+- task definition
+- trusted facts
+- evidence snippets
+- one bounded prompt
+
+## Transition To Code Skeletons
+
+Validated transition artifacts can now be turned into starter code:
+
+```bash
+legacy-delphi-analyzer generate-code /path/to/artifacts
+```
+
+This writes generated skeletons under `artifacts/codegen/`, including:
+
+- React pages, API helpers, and type files
+- Spring Boot controllers, services, repositories, and DTO classes
+
+By default, only modules with accepted validation results are converted. Use
+`--allow-unvalidated` if you want skeletons even when validation is still missing.
 
 ## External Delphi XE Search Paths
 

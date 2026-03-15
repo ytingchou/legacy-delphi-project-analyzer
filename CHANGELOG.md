@@ -1,11 +1,34 @@
 # Changelog
 
-## v1.6.0
+## v2.1.0
 
-- Added feedback learning support for the new backend SQL and UI handoff prompt goals, so accepted weak-model output can be learned back into transition hints.
-- Added compact-guide paths and prompt-goal summaries to `llm-pack/handoff-manifest.json` for downstream Cline or manual loop orchestration.
-- Extended runtime summaries and regression coverage so the new compact guides and backend/UI prompt goals remain visible after packaging.
-- Added programmatic `ingest_feedback_entries(...)` coverage for backend SQL handoff feedback.
+- Added response validation for bounded task output, including schema checks, evidence checks, persisted validation records, and the `validate-response` CLI command.
+- Added a bounded agent loop with `run-loop`, `resume-loop`, and `loop-status`, including task attempts, task history, loop summaries, provider dispatch, and file-based Cline waiting.
+- Added auto-compact task context generation with compiled context artifacts, trusted-facts snapshots, and taskpack-compiled payloads tuned for weak `qwen3`-class models.
+- Added file-based Cline loop orchestration through the bounded loop runtime, so task packs can be emitted, waited on, validated, and learned back into the analyzer.
+- Added validated transition-to-code skeleton generation with `generate-code`, producing React and Spring Boot starter files under `codegen/`.
+- Added regression coverage for validator acceptance/rejection, manual and Cline loop execution, and validated code skeleton generation.
+
+## v2.0.0
+
+- Added bounded loop support for file-based Cline dispatch and response waiting.
+- Added loop state, task-attempt tracking, and task-history persistence under `runtime/`.
+- Added CLI workflows for loop execution and loop inspection.
+
+## v1.9.0
+
+- Added auto-compact compiled task contexts and trusted-facts snapshots for weak-model execution.
+- Added compiled taskpack payloads that narrow context to a single compact artifact before provider execution.
+
+## v1.8.0
+
+- Added bounded agent-loop execution that dispatches one task at a time, validates output, and learns accepted results back into the knowledge store.
+- Added manual, provider, and Cline dispatch modes for loop execution.
+
+## v1.7.0
+
+- Added response validators for schema correctness and evidence grounding.
+- Added persisted `validation-results.json` plus per-task validation records under `runtime/taskpacks/<task-id>/`.
 
 ## v1.5.0
 
