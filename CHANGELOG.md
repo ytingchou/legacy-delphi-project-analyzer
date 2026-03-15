@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.7.0
+
+- Added prompt closure artifacts with goal-specific prompt packs, verification prompts, and acceptance checks.
+- Added minimal repro bundle JSON outputs for prompt packs and failure triage cases.
+- Added workspace-resolution and flow-summary prompt goals so weak internal LLMs can solve one bounded problem at a time.
+- Added closure-summary packaging and regression coverage for prompt closure artifacts.
+
 ## v0.6.0
 
 - Added Delphi workspace resolution for external search paths referenced outside the main repo.

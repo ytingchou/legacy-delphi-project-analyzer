@@ -18,6 +18,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Rule-driven knowledge store for reusable overrides, learned patterns, and suggested overrides
 - Prompt-pack generation and failure triage bundles tailored for low-capability 128k-token LLMs
 - Delphi workspace resolution for external XE search paths and shared repos outside the main project root
+- Prompt closure artifacts with verification prompts, acceptance checks, and minimal repro bundles
 
 ## Usage
 
@@ -90,14 +91,12 @@ The analyzer will also read `.dproj` and `.cfg` search paths automatically. If a
 or a Delphi variable like `$(PDSS_SQL)` is unresolved, the run emits diagnostics, failure triage
 bundles, and prompt-ready hints so a weak internal LLM can still help close the gap.
 
-## v0.6 Highlights
+## v0.7 Highlights
 
-- Each run can resolve external Delphi workspace roots from `.dproj`, `.cfg`,
-  CLI flags, or a `workspace.json` file.
-- Missing or unresolved search paths now appear in diagnostics, `unknowns.md`,
-  failure triage, leadership summaries, and the web report.
-- Shared repositories such as `PDSS_Common` and `PDSS_SQL` can be scanned
-  outside the main project repo without copying them into the same directory.
+- Each prompt pack now carries a goal, verification prompt, and acceptance checks.
+- Each prompt and failure case now emits a minimal repro bundle JSON artifact.
+- Weak models can now be targeted with narrower goals such as search-path resolution,
+  placeholder inference, query intent classification, and flow behavior summarization.
 
 ## Override File
 

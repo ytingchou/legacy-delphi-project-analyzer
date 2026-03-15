@@ -30,9 +30,17 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "llm-pack" / "boss-summary.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderentrytransition.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderlookupclarify.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "orderlookupintent.md").exists())
+            self.assertTrue((output_root / "prompt-pack" / "closure-summary.md").exists())
+            self.assertTrue(
+                (output_root / "prompt-pack" / "repro-bundles" / "orderentrytransition.json").exists()
+            )
             self.assertTrue((output_root / "prompt-pack" / "unknowns.md").exists())
             self.assertTrue(
                 (output_root / "failure-cases" / "orderlookup-unresolved-placeholders.md").exists()
+            )
+            self.assertTrue(
+                (output_root / "failure-cases" / "repro-bundles" / "orderlookup-unresolved-placeholders.json").exists()
             )
             self.assertTrue((output_root / "errors" / "prompt-recipes.md").exists())
             self.assertTrue((output_root / "knowledge" / "learned_patterns.json").exists())
@@ -60,6 +68,11 @@ class PipelineTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("React + Spring Boot", prompt_text)
+            self.assertIn("Verification Prompt", prompt_text)
+            prompt_json = (output_root / "prompt-pack" / "orderlookupclarify.json").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("infer_placeholder_meaning", prompt_json)
             report_text = (output_root / "report" / "index.html").read_text(encoding="utf-8")
             self.assertIn("Complexity Dashboard", report_text)
 

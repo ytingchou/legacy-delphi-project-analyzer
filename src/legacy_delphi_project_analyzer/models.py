@@ -201,13 +201,20 @@ class LoadBundleArtifact:
 class PromptPackArtifact:
     name: str
     category: str
+    goal: str
     target_model: str
     objective: str
+    subject_name: str | None = None
+    issue_summary: str | None = None
     context_paths: list[str] = field(default_factory=list)
     estimated_tokens: int = 0
+    context_budget_tokens: int = 0
     prompt: str | None = None
     fallback_prompt: str | None = None
+    verification_prompt: str | None = None
     expected_response_schema: dict[str, Any] = field(default_factory=dict)
+    acceptance_checks: list[str] = field(default_factory=list)
+    repro_bundle_path: str | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -216,12 +223,46 @@ class FailureTriageArtifact:
     name: str
     issue_code: str
     severity: str
+    goal: str
     summary: str
     likely_root_cause: str
+    subject_name: str | None = None
     context_paths: list[str] = field(default_factory=list)
+    context_budget_tokens: int = 0
     suggested_prompt: str | None = None
     fallback_prompt: str | None = None
+    verification_prompt: str | None = None
+    acceptance_checks: list[str] = field(default_factory=list)
+    repro_bundle_path: str | None = None
     notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class PromptEffectivenessItem:
+    prompt_name: str
+    goal: str
+    subject_name: str | None = None
+    target_model: str | None = None
+    attempts: int = 0
+    accepted: int = 0
+    rejected: int = 0
+    needs_follow_up: int = 0
+    fallback_uses: int = 0
+    success_rate: float = 0.0
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class PromptEffectivenessReport:
+    total_feedback_entries: int
+    accepted_entries: int
+    rejected_entries: int
+    follow_up_entries: int
+    fallback_entries: int
+    top_successful_prompts: list[PromptEffectivenessItem] = field(default_factory=list)
+    top_failing_prompts: list[PromptEffectivenessItem] = field(default_factory=list)
+    goal_summary: dict[str, dict[str, int | float]] = field(default_factory=dict)
+    management_summary: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -284,6 +325,7 @@ class AnalysisOutput:
     prompt_packs: list[PromptPackArtifact] = field(default_factory=list)
     failure_triage: list[FailureTriageArtifact] = field(default_factory=list)
     complexity_report: ComplexityReport | None = None
+    prompt_effectiveness_report: PromptEffectivenessReport | None = None
     diagnostics: list[DiagnosticRecord] = field(default_factory=list)
     manifest: list[ArtifactManifestEntry] = field(default_factory=list)
     output_dir: str | None = None

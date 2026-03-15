@@ -153,6 +153,12 @@ end.
                 encoding="utf-8"
             )
             self.assertIn("PROJECT_SEARCH_PATH_UNRESOLVED", prompt_pack)
+            workspace_pack = (
+                Path(output.output_dir)
+                / "prompt-pack"
+                / "projectsearchpathunresolvedpdsssql.json"
+            ).read_text(encoding="utf-8")
+            self.assertIn("resolve_search_path", workspace_pack)
 
 
 if __name__ == "__main__":

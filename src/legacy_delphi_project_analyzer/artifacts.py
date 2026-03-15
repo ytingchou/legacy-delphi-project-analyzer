@@ -18,9 +18,11 @@ from legacy_delphi_project_analyzer.models import (
     TransitionMappingArtifact,
 )
 from legacy_delphi_project_analyzer.prompting import (
+    build_repro_bundle_payload,
     build_failure_triage,
     build_prompt_packs,
     build_unknowns_markdown,
+    render_closure_summary,
     render_failure_triage_markdown,
     render_prompt_pack_markdown,
 )
@@ -461,10 +463,33 @@ def package_analysis(
     )
 
     prompt_pack_dir = output_root / "prompt-pack"
+    prompt_repro_dir = prompt_pack_dir / "repro-bundles"
     ensure_directory(prompt_pack_dir)
+    ensure_directory(prompt_repro_dir)
     prompt_packs = build_prompt_packs(output, manifest, load_bundles, target_model=target_model)
     output.prompt_packs = prompt_packs
+    closure_summary_path = prompt_pack_dir / "closure-summary.md"
     for prompt_pack in prompt_packs:
+        repro_bundle_path = prompt_repro_dir / f"{slugify(prompt_pack.name)}.json"
+        prompt_pack.repro_bundle_path = repro_bundle_path.as_posix()
+        write_json(
+            repro_bundle_path,
+            build_repro_bundle_payload(
+                source_kind="prompt-pack",
+                name=prompt_pack.name,
+                goal=prompt_pack.goal,
+                target_model=prompt_pack.target_model,
+                issue_summary=prompt_pack.issue_summary or prompt_pack.objective,
+                subject_name=prompt_pack.subject_name,
+                context_paths=prompt_pack.context_paths,
+                context_budget_tokens=prompt_pack.context_budget_tokens,
+                primary_prompt=prompt_pack.prompt,
+                fallback_prompt=prompt_pack.fallback_prompt,
+                verification_prompt=prompt_pack.verification_prompt,
+                expected_response_schema=prompt_pack.expected_response_schema,
+                acceptance_checks=prompt_pack.acceptance_checks,
+            ),
+        )
         prompt_path = prompt_pack_dir / f"{slugify(prompt_pack.name)}.md"
         prompt_json_path = prompt_pack_dir / f"{slugify(prompt_pack.name)}.json"
         write_text(prompt_path, render_prompt_pack_markdown(prompt_pack))
@@ -481,11 +506,23 @@ def package_analysis(
         )
         manifest.append(
             _manifest_entry(
+                "prompt-repro-bundle",
+                repro_bundle_path,
+                ["prompt-pack", "repro-bundle", prompt_pack.goal],
+            )
+        )
+        manifest.append(
+            _manifest_entry(
                 "prompt-pack-json",
                 prompt_json_path,
                 ["prompt-pack", prompt_pack.category, prompt_pack.target_model],
             )
         )
+
+    write_text(closure_summary_path, render_closure_summary(prompt_packs))
+    manifest.append(
+        _manifest_entry("prompt-closure-summary", closure_summary_path, ["prompt-pack", "summary"])
+    )
 
     unknowns_markdown = build_unknowns_markdown(output)
     write_text(prompt_pack_dir / "unknowns.md", unknowns_markdown)
@@ -494,10 +531,31 @@ def package_analysis(
     )
 
     failure_case_dir = output_root / "failure-cases"
+    failure_repro_dir = failure_case_dir / "repro-bundles"
     ensure_directory(failure_case_dir)
+    ensure_directory(failure_repro_dir)
     failure_triage = build_failure_triage(output, manifest, target_model=target_model)
     output.failure_triage = failure_triage
     for triage in failure_triage:
+        repro_bundle_path = failure_repro_dir / f"{slugify(triage.name)}.json"
+        triage.repro_bundle_path = repro_bundle_path.as_posix()
+        write_json(
+            repro_bundle_path,
+            build_repro_bundle_payload(
+                source_kind="failure-triage",
+                name=triage.name,
+                goal=triage.goal,
+                target_model=target_model,
+                issue_summary=triage.summary,
+                subject_name=triage.subject_name,
+                context_paths=triage.context_paths,
+                context_budget_tokens=triage.context_budget_tokens,
+                primary_prompt=triage.suggested_prompt,
+                fallback_prompt=triage.fallback_prompt,
+                verification_prompt=triage.verification_prompt,
+                acceptance_checks=triage.acceptance_checks,
+            ),
+        )
         triage_path = failure_case_dir / f"{slugify(triage.name)}.md"
         triage_json_path = failure_case_dir / f"{slugify(triage.name)}.json"
         write_text(triage_path, render_failure_triage_markdown(triage))
@@ -510,6 +568,13 @@ def package_analysis(
                 estimated_tokens=estimate_tokens(triage_path.read_text(encoding="utf-8")),
                 tags=["failure-triage", triage.issue_code, triage.severity],
                 recommended_for=["debugging", triage.name],
+            )
+        )
+        manifest.append(
+            _manifest_entry(
+                "failure-repro-bundle",
+                repro_bundle_path,
+                ["failure-triage", "repro-bundle", triage.issue_code],
             )
         )
         manifest.append(
