@@ -44,6 +44,10 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentrybffsql.json").exists())
             self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentryui.json").exists())
             self.assertTrue((output_root / "llm-pack" / "bundles" / "orderentryuiintegration.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "backend-sql-manifest.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "backend-sql-guide.md").exists())
+            self.assertTrue((output_root / "llm-pack" / "ui-handoff-manifest.json").exists())
+            self.assertTrue((output_root / "llm-pack" / "ui-handoff-guide.md").exists())
             self.assertTrue((output_root / "llm-pack" / "load-plan.json").exists())
             self.assertTrue((output_root / "llm-pack" / "boss-summary.md").exists())
             self.assertTrue((output_root / "prompt-pack" / "orderentrytransition.md").exists())
@@ -119,6 +123,16 @@ class PipelineTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
             self.assertIn("Target Placement", ui_integration_text)
             self.assertIn("src/features/order-entry", ui_integration_text)
+            backend_guide_text = (
+                output_root / "llm-pack" / "backend-sql-guide.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Backend SQL Compact Guide", backend_guide_text)
+            self.assertIn("OrderEntry / OrderEntryOrderLookupEndpoint", backend_guide_text)
+            ui_guide_text = (
+                output_root / "llm-pack" / "ui-handoff-guide.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("UI Compact Guide", ui_guide_text)
+            self.assertIn("OrderEntry / OrderEntryPage", ui_guide_text)
             prompt_text = (output_root / "prompt-pack" / "orderentrytransition.md").read_text(
                 encoding="utf-8"
             )

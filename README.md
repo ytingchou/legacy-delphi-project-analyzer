@@ -175,6 +175,24 @@ artifacts directly:
   - `llm-pack/ui-reference/`
   - `llm-pack/ui-integration/`
 
+## v1.5 Compact Guides For Weak Models
+
+To keep `qwen3`-class models away from oversized contexts, `analyze` now emits two
+additional compact guides:
+
+- `llm-pack/backend-sql-manifest.json`
+- `llm-pack/backend-sql-guide.md`
+- `llm-pack/ui-handoff-manifest.json`
+- `llm-pack/ui-handoff-guide.md`
+
+These files are deliberately small. They tell the weak model:
+
+- which bundle to load first
+- which prompt pack to use
+- which endpoint or page to stay focused on
+- the estimated bundle token size
+- the exact next artifact paths to read
+
 ## Task Packs And Model Profiles
 
 Task packs are emitted under `artifacts/runtime/taskpacks/` and include:

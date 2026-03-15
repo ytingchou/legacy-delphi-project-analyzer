@@ -870,6 +870,48 @@ def package_analysis(
         _manifest_entry("prompt-closure-summary", closure_summary_path, ["prompt-pack", "summary"])
     )
 
+    backend_manifest_payload = _build_backend_sql_compact_manifest(output, load_bundles, manifest)
+    write_json(llm_pack_dir / "backend-sql-manifest.json", backend_manifest_payload)
+    write_text(
+        llm_pack_dir / "backend-sql-guide.md",
+        _render_backend_sql_compact_manifest(backend_manifest_payload),
+    )
+    manifest.append(
+        _manifest_entry(
+            "backend-sql-manifest",
+            llm_pack_dir / "backend-sql-manifest.json",
+            ["backend-sql", "manifest", "qwen"],
+        )
+    )
+    manifest.append(
+        _manifest_entry(
+            "backend-sql-guide",
+            llm_pack_dir / "backend-sql-guide.md",
+            ["backend-sql", "guide", "qwen"],
+        )
+    )
+
+    ui_manifest_payload = _build_ui_compact_manifest(output, load_bundles, manifest)
+    write_json(llm_pack_dir / "ui-handoff-manifest.json", ui_manifest_payload)
+    write_text(
+        llm_pack_dir / "ui-handoff-guide.md",
+        _render_ui_compact_manifest(ui_manifest_payload),
+    )
+    manifest.append(
+        _manifest_entry(
+            "ui-handoff-manifest",
+            llm_pack_dir / "ui-handoff-manifest.json",
+            ["ui", "manifest", "qwen"],
+        )
+    )
+    manifest.append(
+        _manifest_entry(
+            "ui-handoff-guide",
+            llm_pack_dir / "ui-handoff-guide.md",
+            ["ui", "guide", "qwen"],
+        )
+    )
+
     unknowns_markdown = build_unknowns_markdown(output)
     write_text(prompt_pack_dir / "unknowns.md", unknowns_markdown)
     manifest.append(
@@ -1378,6 +1420,214 @@ def _build_ui_reference_html(artifact: UiReferenceArtifact) -> str:
   </body>
 </html>
 """
+
+
+def _build_backend_sql_compact_manifest(
+    output: AnalysisOutput,
+    bundles: list[LoadBundleArtifact],
+    manifest: list[ArtifactManifestEntry],
+) -> dict:
+    bundle_by_name = {item.name: item for item in bundles}
+    entries = []
+    for artifact in output.bff_sql_artifacts:
+        bff_path = _first_manifest_path(
+            manifest,
+            kind="bff-sql",
+            targets=[artifact.module_name, artifact.query_name],
+        )
+        query_path = _first_manifest_path(
+            manifest,
+            kind="query-artifact",
+            targets=[artifact.query_name],
+        )
+        prompt_name = f"{artifact.module_name}{artifact.query_name}BffSql"
+        bundle_name = f"{artifact.module_name}BffSql"
+        bundle = bundle_by_name.get(bundle_name)
+        entries.append(
+            {
+                "module_name": artifact.module_name,
+                "endpoint_name": artifact.endpoint_name,
+                "query_name": artifact.query_name,
+                "bundle_name": bundle_name,
+                "bundle_estimated_tokens": bundle.estimated_tokens if bundle else 0,
+                "prompt_pack_name": prompt_name,
+                "artifact_paths": [item for item in [bff_path, query_path] if item],
+                "recommended_load_order": [
+                    item
+                    for item in [
+                        "llm-pack/project-summary.md",
+                        f"llm-pack/bundles/{slugify(bundle_name)}.json",
+                        bff_path,
+                        query_path,
+                    ]
+                    if item
+                ],
+                "notes": [
+                    "Keep the weak model scoped to one endpoint and one query at a time.",
+                    "Use the BFF SQL artifact before loading the full query artifact.",
+                ],
+            }
+        )
+    return {
+        "target_model": "qwen3-128k",
+        "max_recommended_context_tokens": 6000,
+        "entries": entries,
+    }
+
+
+def _render_backend_sql_compact_manifest(payload: dict) -> str:
+    lines = [
+        "# Backend SQL Compact Guide",
+        "",
+        f"- Target model: {payload.get('target_model', 'qwen3-128k')}",
+        f"- Max recommended context tokens: {payload.get('max_recommended_context_tokens', 6000)}",
+        "",
+    ]
+    for entry in payload.get("entries", []):
+        lines.extend(
+            [
+                f"## {entry.get('module_name')} / {entry.get('endpoint_name')}",
+                "",
+                f"- Query: {entry.get('query_name')}",
+                f"- Bundle: {entry.get('bundle_name')} ({entry.get('bundle_estimated_tokens')} est tokens)",
+                f"- Prompt pack: {entry.get('prompt_pack_name')}",
+                "- Recommended load order:",
+            ]
+        )
+        lines.extend(f"  - {item}" for item in entry.get("recommended_load_order", []))
+        lines.append("- Notes:")
+        lines.extend(f"  - {item}" for item in entry.get("notes", []))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _build_ui_compact_manifest(
+    output: AnalysisOutput,
+    bundles: list[LoadBundleArtifact],
+    manifest: list[ArtifactManifestEntry],
+) -> dict:
+    bundle_by_name = {item.name: item for item in bundles}
+    reference_by_page = {
+        (item.module_name, item.page_name): item
+        for item in output.ui_reference_artifacts
+    }
+    integration_by_page = {
+        (item.module_name, item.page_name): item
+        for item in output.ui_integration_artifacts
+    }
+    entries = []
+    for artifact in output.ui_pseudo_artifacts:
+        module_name = artifact.module_name
+        page_name = artifact.page_name
+        reference = reference_by_page.get((module_name, page_name))
+        integration = integration_by_page.get((module_name, page_name))
+        ui_bundle_name = f"{module_name}Ui"
+        ui_integration_bundle_name = f"{module_name}UiIntegration"
+        ui_bundle = bundle_by_name.get(ui_bundle_name)
+        integration_bundle = bundle_by_name.get(ui_integration_bundle_name)
+        pseudo_path = _first_manifest_path(
+            manifest,
+            kind="ui-pseudo",
+            targets=[module_name, page_name],
+        )
+        reference_path = _first_manifest_path(
+            manifest,
+            kind="ui-reference",
+            targets=[module_name, page_name],
+        )
+        html_path = reference.html_file_path if reference else None
+        integration_path = _first_manifest_path(
+            manifest,
+            kind="ui-integration",
+            targets=[module_name, page_name],
+        )
+        entries.append(
+            {
+                "module_name": module_name,
+                "page_name": page_name,
+                "route_path": artifact.route_path,
+                "ui_bundle_name": ui_bundle_name,
+                "ui_bundle_estimated_tokens": ui_bundle.estimated_tokens if ui_bundle else 0,
+                "ui_integration_bundle_name": ui_integration_bundle_name,
+                "ui_integration_bundle_estimated_tokens": integration_bundle.estimated_tokens if integration_bundle else 0,
+                "prompt_pack_names": {
+                    "pseudo_ui": f"{module_name}{page_name}PseudoUi",
+                    "reference_ui": f"{module_name}{page_name}ReferenceUi",
+                    "integration": f"{module_name}{page_name}UiIntegration",
+                },
+                "artifact_paths": [item for item in [pseudo_path, reference_path, html_path, integration_path] if item],
+                "recommended_load_order": [
+                    item
+                    for item in [
+                        "llm-pack/project-summary.md",
+                        f"llm-pack/bundles/{slugify(ui_bundle_name)}.json",
+                        pseudo_path,
+                        reference_path,
+                        html_path,
+                        f"llm-pack/bundles/{slugify(ui_integration_bundle_name)}.json",
+                        integration_path,
+                    ]
+                    if item
+                ],
+                "target_feature_dir": integration.target_feature_dir if integration else None,
+                "notes": [
+                    "Generate pseudo UI first, then derive the React/HTML reference UI, then plan project integration.",
+                    "Keep the weak model scoped to one page at a time.",
+                ],
+            }
+        )
+    return {
+        "target_model": "qwen3-128k",
+        "max_recommended_context_tokens": 6000,
+        "entries": entries,
+    }
+
+
+def _render_ui_compact_manifest(payload: dict) -> str:
+    lines = [
+        "# UI Compact Guide",
+        "",
+        f"- Target model: {payload.get('target_model', 'qwen3-128k')}",
+        f"- Max recommended context tokens: {payload.get('max_recommended_context_tokens', 6000)}",
+        "",
+    ]
+    for entry in payload.get("entries", []):
+        lines.extend(
+            [
+                f"## {entry.get('module_name')} / {entry.get('page_name')}",
+                "",
+                f"- Route: {entry.get('route_path')}",
+                f"- UI bundle: {entry.get('ui_bundle_name')} ({entry.get('ui_bundle_estimated_tokens')} est tokens)",
+                f"- Integration bundle: {entry.get('ui_integration_bundle_name')} ({entry.get('ui_integration_bundle_estimated_tokens')} est tokens)",
+                f"- Target feature dir: {entry.get('target_feature_dir') or 'Unknown'}",
+                "- Prompt packs:",
+            ]
+        )
+        prompt_pack_names = entry.get("prompt_pack_names", {})
+        if isinstance(prompt_pack_names, dict):
+            for key, value in prompt_pack_names.items():
+                lines.append(f"  - {key}: {value}")
+        lines.append("- Recommended load order:")
+        lines.extend(f"  - {item}" for item in entry.get("recommended_load_order", []))
+        lines.append("- Notes:")
+        lines.extend(f"  - {item}" for item in entry.get("notes", []))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _first_manifest_path(
+    manifest: list[ArtifactManifestEntry],
+    *,
+    kind: str,
+    targets: list[str],
+) -> str | None:
+    normalized_targets = {item.lower() for item in targets}
+    for entry in manifest:
+        if entry.kind != kind:
+            continue
+        if normalized_targets.intersection(item.lower() for item in entry.recommended_for):
+            return entry.path
+    return None
 
 
 def _build_project_summary(output: AnalysisOutput) -> str:

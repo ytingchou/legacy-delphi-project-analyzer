@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.0
+
+- Added `llm-pack/backend-sql-manifest.json` and `llm-pack/backend-sql-guide.md` for qwen3-friendly backend load order and prompt-pack selection.
+- Added `llm-pack/ui-handoff-manifest.json` and `llm-pack/ui-handoff-guide.md` for page-level pseudo UI, reference UI, and integration sequencing.
+- Added per-entry recommended load order, prompt-pack names, and bundle token estimates so weak models can stay within practical context limits.
+- Added regression coverage for the new compact handoff guides and manifests.
+
 ## v1.4.0
 
 - Extended the boss summary, runtime handoff manifest, and static web dashboard with backend SQL and UI handoff visibility.
