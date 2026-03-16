@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -424,11 +425,11 @@ def _request_provider_json(
         ) from exc
 
     try:
-        response_payload = json.loads(raw_body)
-    except json.JSONDecodeError as exc:
+        response_payload = _coerce_provider_response_payload(raw_body)
+    except ValueError as exc:
         raise ValueError(
-            f"Provider {method} {endpoint} did not return valid JSON: {exc}. "
-            f"Body preview: {raw_body[:240]}"
+            f"Provider {method} {endpoint} returned non-JSON content that could not be normalized. "
+            f"{exc} Body preview: {raw_body[:240]}"
         ) from exc
     if not isinstance(response_payload, dict):
         raise ValueError(f"Provider {method} {endpoint} response must be a JSON object.")
@@ -467,6 +468,87 @@ def _extract_model_ids(payload: dict[str, Any]) -> list[str]:
     return models
 
 
+def _coerce_provider_response_payload(raw_body: str) -> dict[str, Any]:
+    stripped = raw_body.strip()
+    if not stripped:
+        raise ValueError("Response body was empty.")
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        payload = _parse_sse_payload(stripped)
+        if payload is not None:
+            return payload
+        if _looks_like_html(stripped):
+            raise ValueError("Response body looked like HTML, which usually means a proxy/login/error page.")
+        return {
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": stripped},
+                    "finish_reason": "stop",
+                }
+            ],
+            "_response_format": "plain-text",
+        }
+    if not isinstance(payload, dict):
+        raise ValueError("JSON response root was not an object.")
+    return payload
+
+
+def _parse_sse_payload(raw_body: str) -> dict[str, Any] | None:
+    if "data:" not in raw_body:
+        return None
+    content_parts: list[str] = []
+    usage: dict[str, Any] = {}
+    saw_event = False
+    for line in raw_body.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        saw_event = True
+        data = line[5:].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if isinstance(payload.get("usage"), dict):
+            usage = payload["usage"]
+        choices = payload.get("choices")
+        if not isinstance(choices, list):
+            continue
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message")
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                content_parts.append(message["content"])
+                continue
+            delta = choice.get("delta")
+            if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+                content_parts.append(delta["content"])
+    if not saw_event:
+        return None
+    return {
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "".join(content_parts).strip()},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": usage,
+        "_response_format": "sse",
+    }
+
+
+def _looks_like_html(value: str) -> bool:
+    return bool(re.match(r"\s*<(?:!doctype|html|head|body)\b", value, re.I))
+
+
 def _extract_response_text(response_payload: dict[str, Any]) -> str:
     choices = response_payload.get("choices")
     if isinstance(choices, list) and choices:
@@ -481,6 +563,8 @@ def _extract_response_text(response_payload: dict[str, Any]) -> str:
                     for item in content
                     if isinstance(item, dict)
                 )
+    if "choices" not in response_payload:
+        return json.dumps(response_payload, ensure_ascii=False)
     raise ValueError("Provider response did not contain choices[0].message.content.")
 
 

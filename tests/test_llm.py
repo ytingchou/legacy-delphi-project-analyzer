@@ -28,6 +28,20 @@ class _FakeHttpResponse:
         return None
 
 
+class _FakeRawHttpResponse:
+    def __init__(self, payload: str) -> None:
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return self._payload.encode("utf-8")
+
+    def __enter__(self) -> "_FakeRawHttpResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
 class LlmIntegrationTests(unittest.TestCase):
     def test_validate_provider_reports_models_and_completion(self) -> None:
         recorded_urls: list[str] = []
@@ -189,6 +203,49 @@ class LlmIntegrationTests(unittest.TestCase):
             self.assertEqual(result.included_context_paths, [context_one.as_posix()])
             self.assertIn(context_two.as_posix(), result.skipped_context_paths)
             self.assertLessEqual(result.input_token_limit, 120)
+
+    def test_run_llm_accepts_plain_text_provider_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = run_analysis(
+                project_root=FIXTURE_ROOT,
+                output_dir=Path(tmpdir) / "artifacts",
+                phases=["all"],
+            )
+            with patch("urllib.request.urlopen", return_value=_FakeRawHttpResponse('{"result":"ok-from-plain-text"}')):
+                result = run_llm_artifact(
+                    analysis_dir=Path(output.output_dir),
+                    prompt_name="OrderLookupClarify",
+                    provider_base_url="http://provider.example",
+                    model="qwen3-test",
+                    output_token_limit=128,
+                    token_limit=800,
+                )
+            self.assertEqual(result.parsed_response["result"], "ok-from-plain-text")
+
+    def test_run_llm_accepts_sse_provider_response(self) -> None:
+        sse_payload = "\n".join(
+            [
+                'data: {"choices":[{"delta":{"content":"{\\"result\\": "}}]}',
+                'data: {"choices":[{"delta":{"content":"\\"ok-from-sse\\"}"}}]}',
+                "data: [DONE]",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = run_analysis(
+                project_root=FIXTURE_ROOT,
+                output_dir=Path(tmpdir) / "artifacts",
+                phases=["all"],
+            )
+            with patch("urllib.request.urlopen", return_value=_FakeRawHttpResponse(sse_payload)):
+                result = run_llm_artifact(
+                    analysis_dir=Path(output.output_dir),
+                    prompt_name="OrderLookupClarify",
+                    provider_base_url="http://provider.example",
+                    model="qwen3-test",
+                    output_token_limit=128,
+                    token_limit=800,
+                )
+            self.assertEqual(result.parsed_response["result"], "ok-from-sse")
 
 
 if __name__ == "__main__":
