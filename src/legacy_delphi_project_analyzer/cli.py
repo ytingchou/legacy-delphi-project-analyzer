@@ -100,6 +100,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Prompt mode associated with the response being validated.",
     )
 
+    retry_plan_parser = subparsers.add_parser(
+        "retry-plan",
+        help="Read the validator-driven retry plan for one generated task pack.",
+    )
+    retry_plan_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    retry_plan_parser.add_argument("task_id", help="Task ID under runtime/taskpacks/ to inspect.")
+
     loop_parser = subparsers.add_parser(
         "run-loop",
         help="Run the bounded orchestration loop until blockers are reduced or stop conditions are hit.",
@@ -387,6 +394,14 @@ def main(argv: list[str] | None = None) -> int:
             f"unsupported={len(result.unsupported_claims)}, "
             f"missing={len(result.missing_evidence)}"
         )
+        return 0
+    if args.command == "retry-plan":
+        analysis_dir = Path(args.analysis_dir).resolve()
+        task_dir = analysis_dir / "runtime" / "taskpacks" / args.task_id
+        retry_plan_path = task_dir / "retry-plan.json"
+        if not retry_plan_path.exists():
+            raise SystemExit(f"Retry plan does not exist under {task_dir}")
+        print(retry_plan_path.read_text(encoding="utf-8"))
         return 0
     if args.command in {"run-loop", "resume-loop"}:
         provider_config = _provider_config_from_args(args)

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.2.0
+
+- Added validator-driven retry planning with persisted `retry-plan.json` and `retry-plan.md` per task pack.
+- Added explicit validation failure categories, repair prompts, and retry context trimming for weak-model follow-up attempts.
+- Added compact-context support for prior validator feedback so later retries carry only the most useful correction hints.
+- Added regression coverage for unsupported-claim and schema-error retry-plan generation.
+
 ## v2.1.0
 
 - Added response validation for bounded task output, including schema checks, evidence checks, persisted validation records, and the `validate-response` CLI command.

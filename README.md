@@ -25,7 +25,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Compact BFF SQL logic artifacts for Spring Boot + Oracle 19c implementation handoff
 - Runtime orchestration outputs for multi-phase loops, blocker queues, and resumable handoff state
 - Qwen3-oriented model profiles, task packs, and file-based Cline inbox/outbox integration
-- Response validators, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
+- Response validators, validator-driven retry plans, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
 
 ## Usage
 
@@ -76,6 +76,7 @@ Validate one task response against its schema and the recovered legacy evidence:
 
 ```bash
 legacy-delphi-analyzer validate-response /path/to/artifacts task-query-orderlookup-placeholders
+legacy-delphi-analyzer retry-plan /path/to/artifacts task-query-orderlookup-placeholders
 ```
 
 Run or resume the bounded orchestration loop:
@@ -121,6 +122,18 @@ legacy-delphi-analyzer run-llm /path/to/artifacts \
 
 This writes run outputs under `artifacts/llm-runs/`, including a feedback template JSON
 that can be edited and passed to `ingest-feedback`.
+
+## v2.2 Validator-Driven Retry
+
+Each validated task now persists:
+
+- `runtime/taskpacks/<task-id>/validation-record.json`
+- `runtime/taskpacks/<task-id>/retry-plan.json`
+- `runtime/taskpacks/<task-id>/retry-plan.md`
+
+The retry plan classifies failures into bounded categories such as schema errors,
+missing evidence, and unsupported claims. It also emits a repair prompt and a
+smaller retry context set so weak `qwen3`-class models can retry with less noise.
 
 ## v1.0 Transition Specs
 

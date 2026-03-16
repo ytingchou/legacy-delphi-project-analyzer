@@ -32,12 +32,13 @@ def compile_task_context(
 ) -> CompiledContext:
     profile = get_model_profile(taskpack.target_model_profile)
     trusted_facts = _trusted_facts(analysis_dir, taskpack)
+    validator_feedback = _last_validator_feedback(task_dir)
     evidence_snippets, included_paths, skipped_paths = _collect_evidence(
         taskpack.context_paths,
         max_paths=profile.max_context_paths,
         max_tokens=profile.max_input_tokens,
     )
-    markdown = _render_compiled_markdown(taskpack, trusted_facts, evidence_snippets)
+    markdown = _render_compiled_markdown(taskpack, trusted_facts, validator_feedback, evidence_snippets)
     payload = {
         "name": taskpack.task_id,
         "goal": taskpack.task_type,
@@ -67,6 +68,7 @@ def compile_task_context(
             "included_paths": included_paths,
             "skipped_paths": skipped_paths,
             "trusted_facts": trusted_facts,
+            "validator_feedback": validator_feedback,
             "evidence_snippets": evidence_snippets,
         },
     )
@@ -130,6 +132,20 @@ def _trusted_facts(analysis_dir: Path, taskpack: Any) -> list[str]:
     return facts[:8]
 
 
+def _last_validator_feedback(task_dir: Path) -> list[str]:
+    retry_plan_path = task_dir / "retry-plan.json"
+    if not retry_plan_path.exists():
+        return []
+    try:
+        payload = json.loads(retry_plan_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    feedback = payload.get("validator_feedback")
+    if not isinstance(feedback, list):
+        return []
+    return [str(item) for item in feedback if isinstance(item, str)][:6]
+
+
 def _collect_evidence(
     context_paths: list[str],
     *,
@@ -168,7 +184,12 @@ def _summarize_content(path: Path, content: str) -> str:
     return f"### {path.as_posix()}\n```text\n{trim_sql_snippet(joined, limit=900)}\n```\n"
 
 
-def _render_compiled_markdown(taskpack: Any, trusted_facts: list[str], evidence_snippets: list[str]) -> str:
+def _render_compiled_markdown(
+    taskpack: Any,
+    trusted_facts: list[str],
+    validator_feedback: list[str],
+    evidence_snippets: list[str],
+) -> str:
     lines = [
         f"# Compiled Context: {taskpack.task_id}",
         "",
@@ -184,6 +205,8 @@ def _render_compiled_markdown(taskpack: Any, trusted_facts: list[str], evidence_
         "",
     ]
     lines.extend(f"- {item}" for item in trusted_facts)
+    lines.extend(["", "## Validator Feedback", ""])
+    lines.extend(f"- {item}" for item in (validator_feedback or ["No prior validator feedback."]))
     lines.extend(["", "## Evidence Snippets", ""])
     lines.extend(evidence_snippets or ["No evidence snippets available."])
     lines.extend(["", "## Prompt", "", "```text", taskpack.primary_prompt or "", "```", ""])

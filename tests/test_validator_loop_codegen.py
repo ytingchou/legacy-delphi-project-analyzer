@@ -82,6 +82,33 @@ class ValidatorLoopCodegenTests(unittest.TestCase):
             )
             self.assertEqual(record.status, "rejected")
             self.assertIn("Unknown query_name: UnknownQuery", record.issues)
+            self.assertEqual(record.rejection_category, "unsupported_claims")
+            retry_plan = json.loads((task_dir / "retry-plan.json").read_text(encoding="utf-8"))
+            self.assertEqual(retry_plan["rejection_category"], "unsupported_claims")
+            self.assertIn("Remove unsupported claims", retry_plan["repair_prompt"])
+
+    def test_validate_task_response_writes_schema_retry_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = run_phases(
+                project_root=FIXTURE_ROOT,
+                output_dir=Path(tmpdir) / "artifacts",
+                target_model_profile="qwen3_128k_weak",
+                dispatch_mode="manual",
+            )
+            assert output.runtime_state is not None
+            taskpacks = build_taskpacks(output, output.runtime_state, max_tasks=1)
+            write_taskpacks(taskpacks, Path(output.output_dir) / "runtime")
+            task = taskpacks[0]
+            task_dir = Path(output.output_dir) / "runtime" / "taskpacks" / task.task_id
+            record = validate_task_response(
+                analysis_dir=Path(output.output_dir),
+                task_dir=task_dir,
+                response_payload={"result": {"query_name": "OrderLookup"}},
+            )
+            self.assertEqual(record.rejection_category, "schema_error")
+            retry_plan = json.loads((task_dir / "retry-plan.json").read_text(encoding="utf-8"))
+            self.assertEqual(retry_plan["next_prompt_mode"], "fallback")
+            self.assertEqual(len(retry_plan["retry_context_paths"]), 1)
 
     def test_run_loop_manual_learns_from_agent_response(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

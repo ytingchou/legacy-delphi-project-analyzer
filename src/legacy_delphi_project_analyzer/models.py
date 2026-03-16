@@ -410,6 +410,10 @@ class ValidationRecord:
     unsupported_claims: list[str] = field(default_factory=list)
     missing_evidence: list[str] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
+    rejection_category: str | None = None
+    validator_feedback: list[str] = field(default_factory=list)
+    repair_prompt: str | None = None
+    retry_context_paths: list[str] = field(default_factory=list)
     should_learn: bool = False
     should_retry: bool = False
     validated_at: str | None = None

@@ -16,6 +16,7 @@ from legacy_delphi_project_analyzer.orchestrator import (
     refresh_runtime_artifacts,
     rerun_analysis_from_runtime_state,
 )
+from legacy_delphi_project_analyzer.retry_planner import build_retry_plan, classify_validation_failure, write_retry_plan
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 from legacy_delphi_project_analyzer.validators import validate_evidence, validate_schema
 from legacy_delphi_project_analyzer.utils import ensure_directory, write_json, write_text
@@ -228,6 +229,25 @@ def validate_task_response(
     else:
         status = "needs_follow_up" if missing_evidence else "rejected"
 
+    rejection_category = classify_validation_failure(
+        ValidationRecord(
+            task_id=taskpack.task_id,
+            task_type=taskpack.task_type,
+            prompt_mode=prompt_mode,
+            status=status,
+            schema_valid=schema_valid,
+            evidence_valid=evidence_valid,
+            analysis_dir=analysis_dir.as_posix(),
+            subject_name=taskpack.subject_name,
+            module_name=taskpack.module_name,
+            response_path=response_path.as_posix() if response_path else None,
+            parsed_response=parsed_response,
+            supported_claims=supported_claims,
+            unsupported_claims=unsupported_claims,
+            missing_evidence=missing_evidence,
+            issues=schema_issues + unsupported_claims,
+        )
+    )
     record = ValidationRecord(
         task_id=taskpack.task_id,
         task_type=taskpack.task_type,
@@ -244,11 +264,21 @@ def validate_task_response(
         unsupported_claims=unsupported_claims,
         missing_evidence=missing_evidence,
         issues=schema_issues + unsupported_claims,
+        rejection_category=rejection_category,
         should_learn=status in {"accepted", "accepted_with_warnings"},
         should_retry=status in {"needs_follow_up", "rejected"},
         validated_at=datetime.now(UTC).isoformat(),
     )
+    retry_plan = build_retry_plan(analysis_dir=analysis_dir, taskpack=taskpack, record=record)
+    record.validator_feedback = [str(item) for item in retry_plan.get("validator_feedback", [])]
+    record.repair_prompt = str(retry_plan.get("repair_prompt") or "") or None
+    record.retry_context_paths = [
+        str(item)
+        for item in retry_plan.get("retry_context_paths", [])
+        if isinstance(item, str)
+    ]
     _write_validation_record(analysis_dir / "runtime", task_dir, record)
+    write_retry_plan(task_dir, retry_plan)
     return record
 
 
