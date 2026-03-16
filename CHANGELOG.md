@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.1
+
+- Added `validate-provider` to probe OpenAI-compatible providers, list models, and verify chat completion reachability before running loops.
+- Added clearer provider/network/HTTP debug messages plus response previews for provider validation failures.
+- Added CLI progress reporting, `--verbose`, and `--no-progress` across commands.
+- Improved CLI error readability with formatted messages, hints, and optional tracebacks.
+- Added regression coverage for provider validation and CLI console formatting.
+
 ## v3.0.0
 
 - Added a slice delivery pipeline that assembles per-module delivery packages from validated specs, Oracle BFF packs, target integration packs, generated code, remaining gaps, and management summaries.
