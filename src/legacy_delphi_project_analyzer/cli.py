@@ -27,6 +27,7 @@ from legacy_delphi_project_analyzer.orchestrator import (
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 from legacy_delphi_project_analyzer.target_integration import build_target_project_integration_pack
+from legacy_delphi_project_analyzer.workspace_graph import build_workspace_graph
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -264,6 +265,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=None,
         help="Optional output directory. Defaults to <analysis_dir>/llm-pack/bff-sql-compiler.",
+    )
+
+    workspace_graph_parser = subparsers.add_parser(
+        "build-workspace-graph",
+        help="Build a multi-root workspace knowledge graph from the current analysis artifacts.",
+    )
+    workspace_graph_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    workspace_graph_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/workspace-graph.",
     )
     return parser
 
@@ -514,6 +526,17 @@ def main(argv: list[str] | None = None) -> int:
             f"Oracle BFF compiler complete: {manifest['summary']['entry_count']} entries, "
             f"read={manifest['summary']['read_endpoints']}, "
             f"command={manifest['summary']['command_endpoints']}"
+        )
+        return 0
+    if args.command == "build-workspace-graph":
+        graph = build_workspace_graph(
+            Path(args.analysis_dir),
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        print(
+            f"Workspace graph complete: roots={graph['summary']['root_count']}, "
+            f"nodes={graph['summary']['node_count']}, "
+            f"cross_root_edges={graph['summary']['cross_root_edges']}"
         )
         return 0
     if args.command == "phase-status":

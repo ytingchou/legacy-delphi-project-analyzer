@@ -109,6 +109,12 @@ Compile Oracle 19c BFF endpoint packs for Spring Boot implementation:
 legacy-delphi-analyzer compile-bff-sql /path/to/artifacts
 ```
 
+Build a multi-repo workspace graph:
+
+```bash
+legacy-delphi-analyzer build-workspace-graph /path/to/artifacts
+```
+
 Serve the generated web report locally:
 
 ```bash
@@ -189,6 +195,19 @@ These packs add operation kind detection, DTO-to-bind mappings, select-field sum
 pagination/sort heuristics, and semantic checks for unresolved placeholders and DML
 terminator rules. They are designed to give weak LLMs a smaller contract than the
 full transition spec plus full SQL artifact set.
+
+## v2.6 Multi-Repo Workspace Graph
+
+The analyzer can now emit a workspace knowledge graph under:
+
+- `llm-pack/workspace-graph/workspace-graph.json`
+- `llm-pack/workspace-graph/workspace-graph.dot`
+- `llm-pack/workspace-graph/workspace-graph.md`
+
+This graph tracks project roots, external roots, Pascal units, forms, SQL XML files,
+queries, and transition modules. It is especially useful when your Delphi XE setup
+depends on shared repos such as `PDSS_Common` or `PDSS_SQL`, because later loops can
+use the graph instead of re-reading the entire workspace layout.
 
 ## v1.0 Transition Specs
 

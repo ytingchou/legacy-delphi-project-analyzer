@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.6.0
+
+- Added multi-root workspace knowledge graph generation in JSON, DOT, and Markdown formats.
+- Added graph nodes and edges for roots, Pascal units, forms, SQL XML files, queries, and transition modules.
+- Added `build-workspace-graph` and regression coverage for cross-root external repository relationships.
+- Added graph summaries that report root counts, node counts, edge counts, and cross-root edges.
+
 ## v2.5.0
 
 - Added Oracle 19c BFF SQL compiler packs with per-endpoint manifests and Markdown guides.
