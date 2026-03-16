@@ -39,6 +39,11 @@ Or after installation:
 legacy-delphi-analyzer analyze /path/to/project --output-dir artifacts
 ```
 
+Most commands also support:
+
+- `--verbose` for extra debug details and full tracebacks on failure
+- `--no-progress` to suppress progress lines
+
 To generate runtime phase state for later LLM loops:
 
 ```bash
@@ -159,6 +164,17 @@ legacy-delphi-analyzer run-llm /path/to/artifacts \
 
 This writes run outputs under `artifacts/llm-runs/`, including a feedback template JSON
 that can be edited and passed to `ingest-feedback`.
+
+Validate that an OpenAI-compatible provider is reachable before running loops:
+
+```bash
+legacy-delphi-analyzer validate-provider \
+  --provider-base-url http://your-provider-host:8000/v1 \
+  --model qwen3-32b
+```
+
+This probes both `/models` and `/chat/completions`, then prints reachable endpoints,
+listed models, response previews, and actionable debug lines when something fails.
 
 ## v2.2 Validator-Driven Retry
 

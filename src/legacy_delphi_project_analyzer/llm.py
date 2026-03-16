@@ -12,6 +12,83 @@ from legacy_delphi_project_analyzer.models import LlmRunArtifact
 from legacy_delphi_project_analyzer.utils import estimate_tokens, read_text_file, slugify, write_json, write_text
 
 
+def validate_openai_compatible_provider(
+    *,
+    provider_base_url: str,
+    model: str | None = None,
+    api_key: str | None = None,
+    api_key_env: str = "OPENAI_API_KEY",
+    timeout_seconds: int = 30,
+    perform_completion: bool = True,
+) -> dict[str, Any]:
+    resolved_api_key = api_key or os.environ.get(api_key_env)
+    models_endpoint = _normalize_models_url(provider_base_url)
+    chat_endpoint = _normalize_chat_completion_url(provider_base_url)
+    result: dict[str, Any] = {
+        "provider_base_url": provider_base_url,
+        "models_endpoint": models_endpoint,
+        "chat_endpoint": chat_endpoint,
+        "auth_configured": bool(resolved_api_key),
+        "requested_model": model,
+        "listed_models": [],
+        "models_ok": False,
+        "completion_ok": False,
+        "selected_model": None,
+        "response_preview": None,
+        "debug": [],
+        "ok": False,
+    }
+    try:
+        models_payload = _request_provider_json(
+            endpoint=models_endpoint,
+            api_key=resolved_api_key,
+            payload=None,
+            timeout_seconds=timeout_seconds,
+        )
+        model_ids = _extract_model_ids(models_payload)
+        result["listed_models"] = model_ids
+        result["models_ok"] = True
+        result["debug"].append(f"Models endpoint reachable: {models_endpoint}")
+    except ValueError as exc:
+        result["debug"].append(str(exc))
+        if not perform_completion:
+            return result
+        model_ids = []
+
+    selected_model = model or (model_ids[0] if model_ids else None)
+    result["selected_model"] = selected_model
+    if model and result["listed_models"] and model not in result["listed_models"]:
+        result["debug"].append(f"Requested model `{model}` was not listed by the provider.")
+    if perform_completion and selected_model:
+        sample_payload = {
+            "model": selected_model,
+            "messages": [
+                {"role": "system", "content": "Return strict JSON only."},
+                {"role": "user", "content": 'Return {"ok": true, "provider": "validated"}.'},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 64,
+        }
+        try:
+            completion_payload = _request_provider_json(
+                endpoint=chat_endpoint,
+                api_key=resolved_api_key,
+                payload=sample_payload,
+                timeout_seconds=timeout_seconds,
+            )
+            response_text = _extract_response_text(completion_payload)
+            result["completion_ok"] = True
+            result["response_preview"] = response_text[:240]
+            result["debug"].append(f"Chat completion endpoint reachable: {chat_endpoint}")
+        except ValueError as exc:
+            result["debug"].append(str(exc))
+    elif perform_completion and not selected_model:
+        result["debug"].append("Could not determine a model for the sample completion probe.")
+
+    result["ok"] = bool(result["models_ok"] and (result["completion_ok"] or not perform_completion))
+    return result
+
+
 def run_llm_artifact(
     *,
     analysis_dir: Path,
@@ -308,30 +385,53 @@ def _call_openai_compatible_provider(
     timeout_seconds: int,
 ) -> dict[str, Any]:
     endpoint = _normalize_chat_completion_url(provider_base_url)
-    body = json.dumps(payload).encode("utf-8")
+    return _request_provider_json(
+        endpoint=endpoint,
+        api_key=api_key,
+        payload=payload,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _request_provider_json(
+    *,
+    endpoint: str,
+    api_key: str | None,
+    payload: dict[str, Any] | None,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {
         "Content-Type": "application/json",
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    request = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+    method = "POST" if payload is not None else "GET"
+    request = urllib.request.Request(endpoint, data=body if payload is not None else None, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             raw_body = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
         raise ValueError(
-            f"Provider returned HTTP {exc.code} for {endpoint}: {error_body}"
+            f"Provider {method} {endpoint} returned HTTP {exc.code}. "
+            f"Response body: {error_body[:400]}"
         ) from exc
     except urllib.error.URLError as exc:
-        raise ValueError(f"Could not reach provider {endpoint}: {exc.reason}") from exc
+        raise ValueError(
+            f"Could not reach provider endpoint {endpoint}. "
+            f"Network error: {exc.reason}"
+        ) from exc
 
     try:
         response_payload = json.loads(raw_body)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"Provider response was not valid JSON: {exc}") from exc
+        raise ValueError(
+            f"Provider {method} {endpoint} did not return valid JSON: {exc}. "
+            f"Body preview: {raw_body[:240]}"
+        ) from exc
     if not isinstance(response_payload, dict):
-        raise ValueError("Provider response must be a JSON object.")
+        raise ValueError(f"Provider {method} {endpoint} response must be a JSON object.")
     return response_payload
 
 
@@ -342,6 +442,29 @@ def _normalize_chat_completion_url(provider_base_url: str) -> str:
     if value.endswith("/v1"):
         return f"{value}/chat/completions"
     return f"{value}/v1/chat/completions"
+
+
+def _normalize_models_url(provider_base_url: str) -> str:
+    value = provider_base_url.rstrip("/")
+    if value.endswith("/models"):
+        return value
+    if value.endswith("/v1"):
+        return f"{value}/models"
+    return f"{value}/v1/models"
+
+
+def _extract_model_ids(payload: dict[str, Any]) -> list[str]:
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return []
+    models = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("id")
+        if isinstance(model_id, str) and model_id:
+            models.append(model_id)
+    return models
 
 
 def _extract_response_text(response_payload: dict[str, Any]) -> str:

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import tempfile
+import urllib.error
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from legacy_delphi_project_analyzer.llm import run_llm_artifact
+from legacy_delphi_project_analyzer.llm import run_llm_artifact, validate_openai_compatible_provider
 from legacy_delphi_project_analyzer.pipeline import run_analysis
 
 
@@ -28,6 +29,59 @@ class _FakeHttpResponse:
 
 
 class LlmIntegrationTests(unittest.TestCase):
+    def test_validate_provider_reports_models_and_completion(self) -> None:
+        recorded_urls: list[str] = []
+
+        def fake_urlopen(request, timeout=0):  # type: ignore[no-untyped-def]
+            recorded_urls.append(request.full_url)
+            if request.full_url.endswith("/models"):
+                return _FakeHttpResponse(
+                    {
+                        "object": "list",
+                        "data": [{"id": "qwen3-test"}, {"id": "qwen3-fallback"}],
+                    }
+                )
+            return _FakeHttpResponse(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps({"ok": True, "provider": "validated"}),
+                            }
+                        }
+                    ]
+                }
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = validate_openai_compatible_provider(
+                provider_base_url="http://provider.example",
+                model="qwen3-test",
+                api_key="secret-token",
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["models_ok"])
+        self.assertTrue(result["completion_ok"])
+        self.assertEqual(result["selected_model"], "qwen3-test")
+        self.assertIn("http://provider.example/v1/models", recorded_urls)
+        self.assertIn("http://provider.example/v1/chat/completions", recorded_urls)
+
+    def test_validate_provider_collects_debug_when_models_fail(self) -> None:
+        def fake_urlopen(request, timeout=0):  # type: ignore[no-untyped-def]
+            raise urllib.error.URLError("connection refused")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = validate_openai_compatible_provider(
+                provider_base_url="http://provider.example",
+                model="qwen3-test",
+                perform_completion=False,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["models_ok"])
+        self.assertIn("Could not reach provider endpoint", result["debug"][0])
+
     def test_run_llm_uses_prompt_pack_and_writes_feedback_template(self) -> None:
         recorded_request: dict = {}
 

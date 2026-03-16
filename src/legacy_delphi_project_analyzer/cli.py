@@ -6,8 +6,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from legacy_delphi_project_analyzer.benchmarking import benchmark_prompts
+from legacy_delphi_project_analyzer.console import CliReporter, render_cli_exception
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
-from legacy_delphi_project_analyzer.llm import run_llm_artifact
+from legacy_delphi_project_analyzer.llm import run_llm_artifact, validate_openai_compatible_provider
 from legacy_delphi_project_analyzer.cline import emit_cline_task
 from legacy_delphi_project_analyzer.delivery import deliver_slices
 from legacy_delphi_project_analyzer.agent_loop import (
@@ -230,6 +231,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTTP timeout for the provider request.",
     )
 
+    provider_probe_parser = subparsers.add_parser(
+        "validate-provider",
+        help="Probe an OpenAI-compatible provider and print actionable diagnostics.",
+    )
+    provider_probe_parser.add_argument("--provider-base-url", required=True, help="OpenAI-compatible provider base URL.")
+    provider_probe_parser.add_argument("--model", default=None, help="Optional model name to verify and probe.")
+    provider_probe_parser.add_argument("--api-key", default=None, help="Bearer token for the provider.")
+    provider_probe_parser.add_argument(
+        "--api-key-env",
+        default="OPENAI_API_KEY",
+        help="Environment variable to read the provider API key from when --api-key is omitted.",
+    )
+    provider_probe_parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=30,
+        help="HTTP timeout for the provider probe.",
+    )
+    provider_probe_parser.add_argument(
+        "--skip-completion",
+        action="store_true",
+        help="Only check the models endpoint and skip the sample chat completion probe.",
+    )
+
     codegen_parser = subparsers.add_parser(
         "generate-code",
         help="Generate validated React and Spring Boot skeletons from transition specs.",
@@ -330,6 +355,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow code generation and slice packaging even when validation results are incomplete.",
     )
+    for current_parser in (
+        analyze_parser,
+        phase_runner_parser,
+        phase_status_parser,
+        build_taskpacks_parser,
+        validate_response_parser,
+        retry_plan_parser,
+        loop_parser,
+        resume_loop_parser,
+        loop_status_parser,
+        benchmark_parser,
+        dispatch_task_parser,
+        report_parser,
+        feedback_parser,
+        llm_parser,
+        provider_probe_parser,
+        codegen_parser,
+        target_pack_parser,
+        bff_compiler_parser,
+        workspace_graph_parser,
+        subagents_parser,
+        delivery_parser,
+    ):
+        _add_cli_runtime_arguments(current_parser)
     return parser
 
 
@@ -424,18 +473,28 @@ def _add_provider_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+def _add_cli_runtime_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print extra debug details and tracebacks when something fails.",
+    )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Suppress progress lines for long-running commands.",
+    )
+
+
+def _run_command(args, reporter: CliReporter) -> int:
     if args.command == "serve-report":
+        reporter.progress("Starting local report server")
         return serve_report(Path(args.report_dir), host=args.host, port=args.port)
     if args.command == "ingest-feedback":
-        try:
-            result = ingest_feedback(Path(args.analysis_dir), Path(args.feedback_file))
-        except ValueError as exc:
-            raise SystemExit(str(exc))
-        print(f"Feedback imported into: {result['analysis_dir']}")
-        print(
+        reporter.progress("Importing feedback entries")
+        result = ingest_feedback(Path(args.analysis_dir), Path(args.feedback_file))
+        reporter.info(f"Feedback imported into: {result['analysis_dir']}")
+        reporter.info(
             "Feedback summary: "
             f"{result['feedback_entries']} entries, "
             f"{result['accepted']} accepted, "
@@ -445,35 +504,63 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     if args.command == "run-llm":
-        try:
-            result = run_llm_artifact(
-                analysis_dir=Path(args.analysis_dir),
-                prompt_name=args.prompt_name,
-                failure_name=args.failure_name,
-                artifact_json_path=Path(args.artifact_json) if args.artifact_json else None,
-                provider_base_url=args.provider_base_url,
-                model=args.model,
-                api_key=args.api_key,
-                api_key_env=args.api_key_env,
-                prompt_mode=args.prompt_mode,
-                token_limit=args.token_limit,
-                output_token_limit=args.output_token_limit,
-                temperature=args.temperature,
-                timeout_seconds=args.timeout_seconds,
-            )
-        except ValueError as exc:
-            raise SystemExit(str(exc))
-        print(f"LLM run complete: {result.run_id}")
-        print(
+        reporter.progress("Preparing LLM artifact execution")
+        result = run_llm_artifact(
+            analysis_dir=Path(args.analysis_dir),
+            prompt_name=args.prompt_name,
+            failure_name=args.failure_name,
+            artifact_json_path=Path(args.artifact_json) if args.artifact_json else None,
+            provider_base_url=args.provider_base_url,
+            model=args.model,
+            api_key=args.api_key,
+            api_key_env=args.api_key_env,
+            prompt_mode=args.prompt_mode,
+            token_limit=args.token_limit,
+            output_token_limit=args.output_token_limit,
+            temperature=args.temperature,
+            timeout_seconds=args.timeout_seconds,
+        )
+        reporter.info(f"LLM run complete: {result.run_id}")
+        reporter.info(
             "LLM summary: "
             f"{result.artifact_kind} {result.artifact_name}, "
             f"model={result.model}, "
             f"input_tokens~{result.request_tokens_estimate}, "
             f"context={len(result.included_context_paths)} file(s)"
         )
-        print(f"Feedback template: {result.feedback_template_path}")
+        reporter.detail(f"Included context paths: {result.included_context_paths}")
+        reporter.info(f"Feedback template: {result.feedback_template_path}")
+        return 0
+    if args.command == "validate-provider":
+        reporter.progress("Validating provider models endpoint")
+        result = validate_openai_compatible_provider(
+            provider_base_url=args.provider_base_url,
+            model=args.model,
+            api_key=args.api_key,
+            api_key_env=args.api_key_env,
+            timeout_seconds=args.timeout_seconds,
+            perform_completion=not args.skip_completion,
+        )
+        reporter.info(f"Provider base URL: {result['provider_base_url']}")
+        reporter.info(f"Models endpoint: {result['models_endpoint']}")
+        reporter.info(f"Chat endpoint: {result['chat_endpoint']}")
+        reporter.info(f"Auth configured: {str(result['auth_configured']).lower()}")
+        reporter.info(f"Models OK: {str(result['models_ok']).lower()}")
+        reporter.info(f"Completion OK: {str(result['completion_ok']).lower()}")
+        reporter.info(f"Selected model: {result.get('selected_model') or 'None'}")
+        if result.get("listed_models"):
+            reporter.info(f"Listed models: {', '.join(result['listed_models'])}")
+        if result.get("response_preview"):
+            reporter.info(f"Response preview: {result['response_preview']}")
+        if result.get("debug"):
+            reporter.info("Debug:")
+            for item in result["debug"]:
+                reporter.info(f"- {item}")
+        if not result["ok"]:
+            return 1
         return 0
     if args.command == "validate-response":
+        reporter.progress("Validating task response")
         analysis_dir = Path(args.analysis_dir).resolve()
         task_dir = analysis_dir / "runtime" / "taskpacks" / args.task_id
         response_path = Path(args.response_file).resolve() if args.response_file else None
@@ -483,24 +570,27 @@ def main(argv: list[str] | None = None) -> int:
             response_path=response_path,
             prompt_mode=args.prompt_mode,
         )
-        print(f"Validation status: {result.status}")
-        print(
+        reporter.info(f"Validation status: {result.status}")
+        reporter.info(
             f"Schema valid: {str(result.schema_valid).lower()}, "
             f"evidence valid: {str(result.evidence_valid).lower()}, "
             f"supported={len(result.supported_claims)}, "
             f"unsupported={len(result.unsupported_claims)}, "
             f"missing={len(result.missing_evidence)}"
         )
+        if result.repair_prompt:
+            reporter.detail(f"Repair prompt available in runtime/taskpacks/{args.task_id}/retry-plan.md")
         return 0
     if args.command == "retry-plan":
         analysis_dir = Path(args.analysis_dir).resolve()
         task_dir = analysis_dir / "runtime" / "taskpacks" / args.task_id
         retry_plan_path = task_dir / "retry-plan.json"
         if not retry_plan_path.exists():
-            raise SystemExit(f"Retry plan does not exist under {task_dir}")
-        print(retry_plan_path.read_text(encoding="utf-8"))
+            raise ValueError(f"Retry plan does not exist under {task_dir}")
+        reporter.info(retry_plan_path.read_text(encoding="utf-8"))
         return 0
     if args.command in {"run-loop", "resume-loop"}:
+        reporter.progress("Running bounded agent loop")
         provider_config = _provider_config_from_args(args)
         result = run_loop(
             Path(args.analysis_dir),
@@ -515,7 +605,7 @@ def main(argv: list[str] | None = None) -> int:
             api_key_env=provider_config.get("api_key_env", "OPENAI_API_KEY"),
             timeout_seconds=args.timeout_seconds,
         )
-        print(
+        reporter.info(
             f"Loop complete: status={result.status}, phase={result.current_phase}, "
             f"iteration={result.loop_iteration}, stop_reason={result.stop_reason or 'None'}"
         )
@@ -526,73 +616,79 @@ def main(argv: list[str] | None = None) -> int:
         bundle = load_runtime_bundle(analysis_dir)
         run_state = bundle["run_state"]
         if run_state is None:
-            raise SystemExit(f"Runtime state does not exist under {runtime_dir}")
+            raise ValueError(f"Runtime state does not exist under {runtime_dir}")
         history = load_task_history(runtime_dir)
         attempts = load_task_attempts(runtime_dir)
-        print(
+        reporter.info(
             f"Loop: status={run_state.status}, phase={run_state.current_phase}, "
             f"iteration={run_state.loop_iteration}, blocking={run_state.blocking_task_id or 'None'}"
         )
-        print(f"Task attempts tracked: {len(attempts)}")
-        print(f"Task history entries: {len(history)}")
+        reporter.info(f"Task attempts tracked: {len(attempts)}")
+        reporter.info(f"Task history entries: {len(history)}")
         for item in history[-5:]:
-            print(
+            reporter.info(
                 f"- {item.get('task_id')}: "
                 f"{item.get('validation_status') or item.get('status') or 'unknown'} "
                 f"({item.get('prompt_mode') or 'n/a'})"
             )
         return 0
     if args.command == "benchmark-prompts":
+        reporter.progress("Benchmarking prompt families")
         report = benchmark_prompts(Path(args.analysis_dir).resolve())
-        print(
+        reporter.info(
             f"Prompt benchmark complete: {len(report['prompt_benchmark'])} prompt rows, "
             f"{len(report['goal_summary'])} goals"
         )
         return 0
     if args.command == "generate-code":
+        reporter.progress("Generating React and Spring Boot skeletons")
         generated = generate_transition_code(
             Path(args.analysis_dir),
             output_dir=Path(args.output_dir) if args.output_dir else None,
             require_validated=not args.allow_unvalidated,
         )
         base_dir = Path(args.output_dir).resolve() if args.output_dir else (Path(args.analysis_dir).resolve() / "codegen")
-        print(f"Generated code skeletons: {len(generated)}")
-        print(f"Output directory: {base_dir}")
+        reporter.info(f"Generated code skeletons: {len(generated)}")
+        reporter.info(f"Output directory: {base_dir}")
         return 0
     if args.command == "build-target-pack":
+        reporter.progress("Inspecting target React project and building integration pack")
         manifest = build_target_project_integration_pack(
             Path(args.analysis_dir),
             Path(args.target_project_dir),
             output_dir=Path(args.output_dir) if args.output_dir else None,
         )
-        print(
+        reporter.info(
             f"Target integration pack complete: {len(manifest['entries'])} entries, "
             f"target={manifest['target_project_dir']}"
         )
         return 0
     if args.command == "compile-bff-sql":
+        reporter.progress("Compiling Oracle 19c BFF SQL endpoint packs")
         manifest = compile_oracle_bff_sql(
             Path(args.analysis_dir),
             output_dir=Path(args.output_dir) if args.output_dir else None,
         )
-        print(
+        reporter.info(
             f"Oracle BFF compiler complete: {manifest['summary']['entry_count']} entries, "
             f"read={manifest['summary']['read_endpoints']}, "
             f"command={manifest['summary']['command_endpoints']}"
         )
         return 0
     if args.command == "build-workspace-graph":
+        reporter.progress("Building multi-root workspace graph")
         graph = build_workspace_graph(
             Path(args.analysis_dir),
             output_dir=Path(args.output_dir) if args.output_dir else None,
         )
-        print(
+        reporter.info(
             f"Workspace graph complete: roots={graph['summary']['root_count']}, "
             f"nodes={graph['summary']['node_count']}, "
             f"cross_root_edges={graph['summary']['cross_root_edges']}"
         )
         return 0
     if args.command == "run-subagents":
+        reporter.progress("Planning and dispatching bounded subagent batches")
         payload = run_subagent_batches(
             Path(args.analysis_dir),
             dispatch_mode=args.dispatch_mode,
@@ -602,12 +698,13 @@ def main(argv: list[str] | None = None) -> int:
             wait_seconds=args.wait_seconds,
             poll_seconds=args.poll_seconds,
         )
-        print(
+        reporter.info(
             f"Subagent batches complete: {payload['batch_count']} batch(es), "
             f"dispatch={payload['dispatch_mode']}"
         )
         return 0
     if args.command == "deliver-slice":
+        reporter.progress("Assembling slice delivery packages")
         manifest = deliver_slices(
             Path(args.analysis_dir),
             module_names=args.modules,
@@ -615,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=Path(args.output_dir) if args.output_dir else None,
             allow_unvalidated=args.allow_unvalidated,
         )
-        print(
+        reporter.info(
             f"Slice delivery complete: {manifest['delivery_count']} module package(s), "
             f"target={manifest.get('target_project_dir') or 'None'}"
         )
@@ -627,29 +724,30 @@ def main(argv: list[str] | None = None) -> int:
         blockers = bundle["blocking_unknowns"]
         completeness = bundle["artifact_completeness"]
         if run_state is None:
-            raise SystemExit(f"Runtime state does not exist under {Path(args.analysis_dir) / 'runtime'}")
-        print(f"Run ID: {run_state.run_id}")
-        print(
+            raise ValueError(f"Runtime state does not exist under {Path(args.analysis_dir) / 'runtime'}")
+        reporter.info(f"Run ID: {run_state.run_id}")
+        reporter.info(
             f"Runtime: status={run_state.status}, phase={run_state.current_phase}, "
             f"loop={run_state.loop_iteration}, model_profile={run_state.target_model_profile}"
         )
         if completeness is not None:
-            print(
+            reporter.info(
                 f"Artifacts: {completeness.completed_count}/{completeness.required_count} required artifacts complete"
             )
-        print(f"Blockers: {len(blockers)}")
+        reporter.info(f"Blockers: {len(blockers)}")
         for phase_state in phase_states:
-            print(
+            reporter.info(
                 f"- {phase_state.phase}: {phase_state.status}, completion={phase_state.completion_score}/100, "
                 f"blockers={len(phase_state.blockers)}"
             )
         return 0
     if args.command == "build-taskpacks":
+        reporter.progress("Regenerating task packs from runtime blockers")
         analysis_dir = Path(args.analysis_dir).resolve()
         bundle = load_runtime_bundle(analysis_dir)
         run_state = bundle["run_state"]
         if run_state is None:
-            raise SystemExit(f"Runtime state does not exist under {analysis_dir / 'runtime'}")
+            raise ValueError(f"Runtime state does not exist under {analysis_dir / 'runtime'}")
         output = rerun_analysis_from_runtime_state(analysis_dir)
         refresh_runtime_artifacts(
             output,
@@ -661,21 +759,21 @@ def main(argv: list[str] | None = None) -> int:
         assert output.runtime_state is not None
         taskpacks = build_taskpacks(output, output.runtime_state, max_tasks=args.max_tasks)
         written = write_taskpacks(taskpacks, analysis_dir / "runtime")
-        print(f"Task packs generated: {len(written)}")
+        reporter.info(f"Task packs generated: {len(written)}")
         for path in written[:10]:
-            print(f"- {path}")
+            reporter.info(f"- {path}")
         return 0
     if args.command == "dispatch-task":
         analysis_dir = Path(args.analysis_dir).resolve()
         task_dir = analysis_dir / "runtime" / "taskpacks" / args.task_id
         taskpack = load_taskpack(task_dir)
         if taskpack is None:
-            raise SystemExit(f"Task pack does not exist or is invalid: {task_dir}")
+            raise ValueError(f"Task pack does not exist or is invalid: {task_dir}")
         if args.mode == "manual":
-            print(f"Task pack ready for manual execution: {task_dir}")
+            reporter.info(f"Task pack ready for manual execution: {task_dir}")
             return 0
         request_path = emit_cline_task(taskpack, task_dir, analysis_dir / "runtime")
-        print(f"Cline request emitted: {request_path}")
+        reporter.info(f"Cline request emitted: {request_path}")
         return 0
     if args.command not in {"analyze", "run-phases"}:
         parser.error("Unsupported command")
@@ -697,6 +795,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.command == "run-phases":
+        reporter.progress("Running full analysis and runtime phase orchestration")
         output = run_phases(
             project_root=Path(args.project_root),
             output_dir=Path(args.output_dir),
@@ -712,8 +811,10 @@ def main(argv: list[str] | None = None) -> int:
             dispatch_mode=args.dispatch_mode,
             provider_config=_provider_config_from_args(args),
         )
+        reporter.progress("Refreshing prompt benchmark outputs")
         benchmark_prompts(Path(output.output_dir))
     else:
+        reporter.progress("Running analysis")
         output = run_analysis(
             project_root=Path(args.project_root),
             output_dir=Path(args.output_dir),
@@ -726,39 +827,60 @@ def main(argv: list[str] | None = None) -> int:
             max_artifact_tokens=args.max_artifact_tokens,
             target_model=args.target_model,
         )
+        reporter.progress("Refreshing runtime artifacts")
         refresh_runtime_artifacts(
             output,
             target_model_profile=args.model_profile,
             dispatch_mode="manual",
             analysis_config=analysis_config,
         )
+        reporter.progress("Refreshing prompt benchmark outputs")
         benchmark_prompts(Path(output.output_dir))
 
     fatal_count = len([item for item in output.diagnostics if item.severity == "fatal"])
     error_count = len([item for item in output.diagnostics if item.severity == "error"])
-    print(f"Analysis complete: {output.output_dir}")
-    print(
+    reporter.info(f"Analysis complete: {output.output_dir}")
+    reporter.info(
         "Artifacts: "
         f"{len(output.manifest)} files, "
         f"{len(output.pascal_units)} Pascal units, "
         f"{len(output.forms)} forms, "
         f"{len(output.resolved_queries)} resolved queries"
     )
-    print(
+    reporter.info(
         "Workspace: "
         f"{len(output.inventory.scan_roots)} scan roots, "
         f"{len(output.inventory.external_roots)} external roots, "
         f"{len(output.inventory.missing_search_paths)} missing paths, "
         f"{len(output.inventory.unresolved_search_paths)} unresolved paths"
     )
-    print(f"Diagnostics: {len(output.diagnostics)} total, {error_count} error, {fatal_count} fatal")
+    reporter.info(f"Diagnostics: {len(output.diagnostics)} total, {error_count} error, {fatal_count} fatal")
     report_path = Path(output.output_dir) / "report" / "index.html"
     if report_path.exists():
-        print(f"Web report: {report_path}")
+        reporter.info(f"Web report: {report_path}")
     runtime_path = Path(output.output_dir) / "runtime" / "run-state.json"
     if runtime_path.exists():
-        print(f"Runtime state: {runtime_path}")
+        reporter.info(f"Runtime state: {runtime_path}")
     return 1 if args.fail_on_fatal and fatal_count else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    reporter = CliReporter(
+        verbose=bool(getattr(args, "verbose", False)),
+        progress_enabled=not bool(getattr(args, "no_progress", False)),
+    )
+    try:
+        return _run_command(args, reporter)
+    except SystemExit as exc:
+        if isinstance(exc.code, str):
+            reporter.error(render_cli_exception(RuntimeError(exc.code), command=getattr(args, "command", None), verbose=reporter.verbose))
+            return 2
+        raise
+    except Exception as exc:  # noqa: BLE001
+        reporter.error(render_cli_exception(exc, command=getattr(args, "command", None), verbose=reporter.verbose))
+        return 2
 
 
 def serve_report(report_dir: Path, host: str, port: int) -> int:
