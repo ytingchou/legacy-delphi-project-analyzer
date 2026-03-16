@@ -25,6 +25,7 @@ from legacy_delphi_project_analyzer.orchestrator import (
     run_phases,
 )
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
+from legacy_delphi_project_analyzer.subagents import run_subagent_batches
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 from legacy_delphi_project_analyzer.target_integration import build_target_project_integration_pack
 from legacy_delphi_project_analyzer.workspace_graph import build_workspace_graph
@@ -277,6 +278,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output directory. Defaults to <analysis_dir>/llm-pack/workspace-graph.",
     )
+
+    subagents_parser = subparsers.add_parser(
+        "run-subagents",
+        help="Plan and dispatch a bounded batch of prompt-pack subagent tasks.",
+    )
+    subagents_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    subagents_parser.add_argument(
+        "--dispatch-mode",
+        choices=["manual", "cline"],
+        default="manual",
+        help="Dispatch mode for the subagent batch.",
+    )
+    subagents_parser.add_argument("--max-tasks", type=int, default=4, help="Maximum task count to include.")
+    subagents_parser.add_argument("--batch-size", type=int, default=2, help="Tasks per batch.")
+    subagents_parser.add_argument(
+        "--goal",
+        dest="goals",
+        action="append",
+        default=[],
+        help="Optional prompt goal filter. Can be repeated.",
+    )
+    subagents_parser.add_argument("--wait-seconds", type=int, default=120, help="Wait time for Cline responses.")
+    subagents_parser.add_argument("--poll-seconds", type=float, default=1.0, help="Polling interval for Cline responses.")
     return parser
 
 
@@ -537,6 +561,21 @@ def main(argv: list[str] | None = None) -> int:
             f"Workspace graph complete: roots={graph['summary']['root_count']}, "
             f"nodes={graph['summary']['node_count']}, "
             f"cross_root_edges={graph['summary']['cross_root_edges']}"
+        )
+        return 0
+    if args.command == "run-subagents":
+        payload = run_subagent_batches(
+            Path(args.analysis_dir),
+            dispatch_mode=args.dispatch_mode,
+            max_tasks=args.max_tasks,
+            batch_size=args.batch_size,
+            goal_filters=args.goals,
+            wait_seconds=args.wait_seconds,
+            poll_seconds=args.poll_seconds,
+        )
+        print(
+            f"Subagent batches complete: {payload['batch_count']} batch(es), "
+            f"dispatch={payload['dispatch_mode']}"
         )
         return 0
     if args.command == "phase-status":

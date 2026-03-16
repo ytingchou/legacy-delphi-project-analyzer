@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.7.0
+
+- Added multi-subagent batch orchestration for prompt-pack tasks with manual and Cline dispatch modes.
+- Added batched task planning, compiled contexts, batch result summaries, and batch-plan persistence under `runtime/subagents/`.
+- Added `run-subagents` for bounded multi-task execution without collapsing tasks into one oversized prompt.
+- Added regression coverage for manual batch planning and file-based Cline batch validation.
+
 ## v2.6.0
 
 - Added multi-root workspace knowledge graph generation in JSON, DOT, and Markdown formats.

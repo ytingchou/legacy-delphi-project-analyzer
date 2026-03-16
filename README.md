@@ -115,6 +115,17 @@ Build a multi-repo workspace graph:
 legacy-delphi-analyzer build-workspace-graph /path/to/artifacts
 ```
 
+Run bounded prompt-pack batches as file-based subagents:
+
+```bash
+legacy-delphi-analyzer run-subagents /path/to/artifacts \
+  --dispatch-mode cline \
+  --max-tasks 4 \
+  --batch-size 2 \
+  --goal classify_query_intent \
+  --goal infer_placeholder_meaning
+```
+
 Serve the generated web report locally:
 
 ```bash
@@ -208,6 +219,18 @@ This graph tracks project roots, external roots, Pascal units, forms, SQL XML fi
 queries, and transition modules. It is especially useful when your Delphi XE setup
 depends on shared repos such as `PDSS_Common` or `PDSS_SQL`, because later loops can
 use the graph instead of re-reading the entire workspace layout.
+
+## v2.7 Multi-Subagent Orchestration
+
+The analyzer can now batch prompt-pack tasks into bounded subagent runs under:
+
+- `runtime/subagents/batch-plan.json`
+- `runtime/subagents/batch-results.json`
+- `runtime/subagents/batch-summary.md`
+
+This is intentionally file-based and qwen3-friendly. You can choose a narrow goal
+set, dispatch the batch to Cline, and validate several small tasks without letting
+the context explode into one giant 128k-token prompt.
 
 ## v1.0 Transition Specs
 
