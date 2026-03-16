@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.0.2
+
+- Added fallback parsing for `text/event-stream` chat completion responses from OpenAI-compatible providers.
+- Added fallback parsing for providers that return plain-text JSON content instead of a full OpenAI response envelope.
+- Improved non-JSON provider diagnostics so HTML/proxy pages, SSE streams, and plain-text bodies are easier to distinguish.
+- Added regression coverage for SSE and plain-text provider response handling.
+
 ## v3.0.1
 
 - Added `validate-provider` to probe OpenAI-compatible providers, list models, and verify chat completion reachability before running loops.
