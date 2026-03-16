@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.0.0
+
+- Added a slice delivery pipeline that assembles per-module delivery packages from validated specs, Oracle BFF packs, target integration packs, generated code, remaining gaps, and management summaries.
+- Added `deliver-slice` plus delivery manifests and per-module delivery summaries under `delivery-slices/`.
+- Added delivery-time enrichment from target React projects and previously generated code skeletons.
+- Added regression coverage for end-to-end delivery package assembly.
+
 ## v2.7.0
 
 - Added multi-subagent batch orchestration for prompt-pack tasks with manual and Cline dispatch modes.

@@ -126,6 +126,13 @@ legacy-delphi-analyzer run-subagents /path/to/artifacts \
   --goal infer_placeholder_meaning
 ```
 
+Assemble final per-module delivery packages:
+
+```bash
+legacy-delphi-analyzer deliver-slice /path/to/artifacts \
+  --target-project-dir /path/to/react-project
+```
+
 Serve the generated web report locally:
 
 ```bash
@@ -231,6 +238,20 @@ The analyzer can now batch prompt-pack tasks into bounded subagent runs under:
 This is intentionally file-based and qwen3-friendly. You can choose a narrow goal
 set, dispatch the batch to Cline, and validate several small tasks without letting
 the context explode into one giant 128k-token prompt.
+
+## v3.0 Slice Delivery Pipeline
+
+The analyzer can now assemble final delivery packages under:
+
+- `delivery-slices/delivery-manifest.json`
+- `delivery-slices/delivery-guide.md`
+- `delivery-slices/<module>/slice-manifest.json`
+- `delivery-slices/<module>/slice-summary.md`
+
+Each module package bundles the transition spec state, Oracle BFF compiler output,
+target-project integration entries, generated React/Spring skeleton files, remaining
+gaps, and a boss-summary excerpt. This is the first version that is intentionally
+shaped to hand off one bounded delivery slice to engineering or to a later Cline loop.
 
 ## v1.0 Transition Specs
 

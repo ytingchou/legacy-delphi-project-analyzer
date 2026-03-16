@@ -9,6 +9,7 @@ from legacy_delphi_project_analyzer.benchmarking import benchmark_prompts
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.llm import run_llm_artifact
 from legacy_delphi_project_analyzer.cline import emit_cline_task
+from legacy_delphi_project_analyzer.delivery import deliver_slices
 from legacy_delphi_project_analyzer.agent_loop import (
     load_task_attempts,
     load_task_history,
@@ -301,6 +302,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subagents_parser.add_argument("--wait-seconds", type=int, default=120, help="Wait time for Cline responses.")
     subagents_parser.add_argument("--poll-seconds", type=float, default=1.0, help="Polling interval for Cline responses.")
+
+    delivery_parser = subparsers.add_parser(
+        "deliver-slice",
+        help="Assemble a per-module delivery package from validated specs, BFF packs, integration packs, and generated code.",
+    )
+    delivery_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    delivery_parser.add_argument(
+        "--module",
+        dest="modules",
+        action="append",
+        default=[],
+        help="Optional module name filter. Can be repeated.",
+    )
+    delivery_parser.add_argument(
+        "--target-project-dir",
+        default=None,
+        help="Optional target React project root for integration-pack enrichment.",
+    )
+    delivery_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/delivery-slices.",
+    )
+    delivery_parser.add_argument(
+        "--allow-unvalidated",
+        action="store_true",
+        help="Allow code generation and slice packaging even when validation results are incomplete.",
+    )
     return parser
 
 
@@ -576,6 +605,19 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Subagent batches complete: {payload['batch_count']} batch(es), "
             f"dispatch={payload['dispatch_mode']}"
+        )
+        return 0
+    if args.command == "deliver-slice":
+        manifest = deliver_slices(
+            Path(args.analysis_dir),
+            module_names=args.modules,
+            target_project_dir=Path(args.target_project_dir) if args.target_project_dir else None,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+            allow_unvalidated=args.allow_unvalidated,
+        )
+        print(
+            f"Slice delivery complete: {manifest['delivery_count']} module package(s), "
+            f"target={manifest.get('target_project_dir') or 'None'}"
         )
         return 0
     if args.command == "phase-status":
