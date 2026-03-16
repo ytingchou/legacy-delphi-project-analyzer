@@ -36,6 +36,8 @@ def run_loop(
     api_key_env: str = "OPENAI_API_KEY",
     timeout_seconds: int = 120,
 ) -> Any:
+    from legacy_delphi_project_analyzer.benchmarking import benchmark_prompts
+
     analysis_dir = analysis_dir.resolve()
     runtime_dir = analysis_dir / "runtime"
     bundle = load_runtime_bundle(analysis_dir)
@@ -80,6 +82,7 @@ def run_loop(
             run_state.status = "completed"
             run_state.stop_reason = "all_required_artifacts_ready"
             _save_loop_files(runtime_dir, run_state, attempts, history)
+            benchmark_prompts(analysis_dir)
             return run_state
 
         next_task = _select_next_task(output, attempts, max_task_attempts)
@@ -87,6 +90,7 @@ def run_loop(
             run_state.status = "completed"
             run_state.stop_reason = "max_task_attempts_reached"
             _save_loop_files(runtime_dir, run_state, attempts, history)
+            benchmark_prompts(analysis_dir)
             return run_state
 
         taskpacks = build_taskpacks(output, run_state)
@@ -133,6 +137,7 @@ def run_loop(
                 }
             )
             _save_loop_files(runtime_dir, run_state, attempts, history)
+            benchmark_prompts(analysis_dir)
             return run_state
 
         validation = validate_task_response(
@@ -174,6 +179,7 @@ def run_loop(
             }
         )
         _save_loop_files(runtime_dir, run_state, attempts, history)
+        benchmark_prompts(analysis_dir)
 
         if validation.status == "accepted":
             continue
@@ -182,6 +188,7 @@ def run_loop(
     run_state.status = "stopped"
     run_state.stop_reason = "max_loops_reached"
     _save_loop_files(runtime_dir, run_state, attempts, history)
+    benchmark_prompts(analysis_dir)
     return run_state
 
 
@@ -396,6 +403,12 @@ def _normalize_response_payload(payload: dict[str, Any] | None) -> dict[str, Any
 def _write_validation_record(runtime_dir: Path, task_dir: Path, record: ValidationRecord) -> None:
     ensure_directory(runtime_dir)
     write_json(task_dir / "validation-result.json", record)
+    history_path = task_dir / "validation-history.json"
+    task_history = _load_json(history_path, default=[])
+    if not isinstance(task_history, list):
+        task_history = []
+    task_history.append(to_jsonable(record))
+    write_json(history_path, task_history)
     path = runtime_dir / "validation-results.json"
     payload = _load_json(path, default=[])
     if not isinstance(payload, list):
@@ -407,6 +420,12 @@ def _write_validation_record(runtime_dir: Path, task_dir: Path, record: Validati
     ]
     payload.append(to_jsonable(record))
     write_json(path, payload)
+    runtime_history_path = runtime_dir / "validation-history.json"
+    runtime_history = _load_json(runtime_history_path, default=[])
+    if not isinstance(runtime_history, list):
+        runtime_history = []
+    runtime_history.append(to_jsonable(record))
+    write_json(runtime_history_path, runtime_history)
 
 
 def _update_metrics(

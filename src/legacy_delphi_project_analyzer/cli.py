@@ -5,6 +5,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from legacy_delphi_project_analyzer.benchmarking import benchmark_prompts
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.llm import run_llm_artifact
 from legacy_delphi_project_analyzer.cline import emit_cline_task
@@ -142,6 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read current loop state, task attempts, and task history from runtime files.",
     )
     loop_status_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+
+    benchmark_parser = subparsers.add_parser(
+        "benchmark-prompts",
+        help="Score prompt/taskpack templates from validation and feedback history.",
+    )
+    benchmark_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
 
     dispatch_task_parser = subparsers.add_parser(
         "dispatch-task",
@@ -445,6 +452,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"({item.get('prompt_mode') or 'n/a'})"
             )
         return 0
+    if args.command == "benchmark-prompts":
+        report = benchmark_prompts(Path(args.analysis_dir).resolve())
+        print(
+            f"Prompt benchmark complete: {len(report['prompt_benchmark'])} prompt rows, "
+            f"{len(report['goal_summary'])} goals"
+        )
+        return 0
     if args.command == "generate-code":
         generated = generate_transition_code(
             Path(args.analysis_dir),
@@ -547,6 +561,7 @@ def main(argv: list[str] | None = None) -> int:
             dispatch_mode=args.dispatch_mode,
             provider_config=_provider_config_from_args(args),
         )
+        benchmark_prompts(Path(output.output_dir))
     else:
         output = run_analysis(
             project_root=Path(args.project_root),
@@ -566,6 +581,7 @@ def main(argv: list[str] | None = None) -> int:
             dispatch_mode="manual",
             analysis_config=analysis_config,
         )
+        benchmark_prompts(Path(output.output_dir))
 
     fatal_count = len([item for item in output.diagnostics if item.severity == "fatal"])
     error_count = len([item for item in output.diagnostics if item.severity == "error"])

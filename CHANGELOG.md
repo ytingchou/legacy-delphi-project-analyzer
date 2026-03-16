@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.3.0
+
+- Added prompt benchmarking and template-tuning reports under `runtime/prompt-benchmark.*`.
+- Added prompt-family scoring from task-pack metadata, validation history, and feedback history.
+- Added `benchmark-prompts` plus automatic benchmark refresh after `analyze`, `run-phases`, and loop runs.
+- Added regression coverage for prompt benchmark generation and tuning recommendations.
+
 ## v2.2.0
 
 - Added validator-driven retry planning with persisted `retry-plan.json` and `retry-plan.md` per task pack.

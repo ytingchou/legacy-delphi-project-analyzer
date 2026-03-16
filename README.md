@@ -88,6 +88,7 @@ legacy-delphi-analyzer run-loop /path/to/artifacts \
 
 legacy-delphi-analyzer resume-loop /path/to/artifacts --max-loops 5
 legacy-delphi-analyzer loop-status /path/to/artifacts
+legacy-delphi-analyzer benchmark-prompts /path/to/artifacts
 ```
 
 Dispatch one task pack into the file-based Cline inbox:
@@ -134,6 +135,19 @@ Each validated task now persists:
 The retry plan classifies failures into bounded categories such as schema errors,
 missing evidence, and unsupported claims. It also emits a repair prompt and a
 smaller retry context set so weak `qwen3`-class models can retry with less noise.
+
+## v2.3 Prompt Benchmarking
+
+Prompt benchmarking now writes:
+
+- `runtime/prompt-benchmark.json`
+- `runtime/prompt-benchmark.md`
+- `runtime/prompt-template-tuning.json`
+
+These reports combine task-pack metadata, validation history, and feedback history
+to show which prompt families are stable, which ones still overrun weak-model
+capacity, and whether `primary`, `fallback`, or `verification` templates should
+be preferred by task type.
 
 ## v1.0 Transition Specs
 
