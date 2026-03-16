@@ -80,6 +80,7 @@ def build_analysis_cheat_sheet_payload(output: Any) -> dict[str, Any]:
             "Save the answer to runtime/taskpacks/<task-id>/agent-response.json.",
             f"Run legacy-delphi-analyzer validate-response {analysis_dir.as_posix()} <task-id>.",
             f"If validation fails, run legacy-delphi-analyzer retry-plan {analysis_dir.as_posix()} <task-id> and feed retry-plan.md back to Cline.",
+            f"For automation, use legacy-delphi-analyzer run-cline-wrapper {analysis_dir.as_posix()} --cline-cmd <your cline command> --watch.",
         ],
         "artifacts": {
             "project_summary": (analysis_dir / "llm-pack" / "project-summary.md").as_posix(),
@@ -181,6 +182,7 @@ def build_runtime_cheat_sheet_payload(
             "build_taskpacks": f"legacy-delphi-analyzer build-taskpacks {analysis_dir.as_posix()}",
             "run_loop": f"legacy-delphi-analyzer run-loop {analysis_dir.as_posix()} --dispatch-mode cline --verbose",
             "resume_loop": f"legacy-delphi-analyzer resume-loop {analysis_dir.as_posix()} --verbose",
+            "run_wrapper": f"legacy-delphi-analyzer run-cline-wrapper {analysis_dir.as_posix()} --cline-cmd <your cline command> --watch",
         },
         "top_blockers": top_blockers,
     }
@@ -286,6 +288,7 @@ def render_runtime_cheat_sheet_markdown(payload: dict[str, Any]) -> str:
 {payload['commands']['build_taskpacks']}
 {payload['commands']['run_loop']}
 {payload['commands']['resume_loop']}
+{payload['commands']['run_wrapper']}
 ```
 
 ## Current Top Blockers

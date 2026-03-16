@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.7.0
+
+- Added a bundled Cline bridge runner with watch/once/resume modes, output sanitizing, JSON repair, auto-validation, and retry-plan follow-up.
+- Added structured runtime error summaries under `runtime/errors/` with next-action guidance, suggested commands, and provider/runtime recovery hints.
+- Added weak-model task-specific prompt profiles for SQL, UI, integration, and validation-oriented qwen3 workloads.
+- Added web workbench enhancements to the HTML report for task queues, provider health, runtime errors, and human review visibility.
+- Added human review recording with `review-task`, review summaries, and feedback-learning integration for accepted outputs.
+- Added VSCode Cline helper files per task pack, including quick-open notes, copy-prompt text, response templates, and explicit prompt variant files.
+- Added a dedicated quick-start workflow for Cline CLI and the VSCode Cline extension, plus provider-health persistence into the runtime workspace.
+
 ## v3.1.1
 
 - Added a dedicated quick-start guide for using analyzer artifacts with Cline CLI and the VSCode Cline extension.

@@ -528,6 +528,9 @@ class AnalysisOutput:
     artifact_completeness: Any | None = None
     loop_metrics: Any | None = None
     taskpacks: list[Any] = field(default_factory=list)
+    runtime_error_summary: dict[str, Any] | None = None
+    provider_health: dict[str, Any] | None = None
+    review_summary: dict[str, Any] | None = None
     output_dir: str | None = None
 
 

@@ -46,6 +46,59 @@ MODEL_PROFILES = {
             "infer_placeholder_meaning",
         ],
     ),
+    "qwen3_sql": ModelProfile(
+        name="qwen3_sql",
+        max_input_tokens=9000,
+        max_output_tokens=900,
+        max_context_paths=3,
+        temperature=0.0,
+        strict_json=True,
+        allow_open_ended_design=False,
+        preferred_task_types=[
+            "classify_query_intent",
+            "generate_bff_oracle_sql_logic",
+            "infer_placeholder_meaning",
+        ],
+    ),
+    "qwen3_ui": ModelProfile(
+        name="qwen3_ui",
+        max_input_tokens=9000,
+        max_output_tokens=1000,
+        max_context_paths=3,
+        temperature=0.1,
+        strict_json=True,
+        allow_open_ended_design=False,
+        preferred_task_types=[
+            "generate_react_pseudo_ui",
+            "generate_react_reference_ui",
+        ],
+    ),
+    "qwen3_integration": ModelProfile(
+        name="qwen3_integration",
+        max_input_tokens=8000,
+        max_output_tokens=900,
+        max_context_paths=3,
+        temperature=0.1,
+        strict_json=True,
+        allow_open_ended_design=False,
+        preferred_task_types=[
+            "integrate_react_transition_ui",
+        ],
+    ),
+    "qwen3_validation": ModelProfile(
+        name="qwen3_validation",
+        max_input_tokens=6000,
+        max_output_tokens=700,
+        max_context_paths=2,
+        temperature=0.0,
+        strict_json=True,
+        allow_open_ended_design=False,
+        preferred_task_types=[
+            "validate_transition_spec",
+            "classify_query_intent",
+            "infer_placeholder_meaning",
+        ],
+    ),
     "strong_reasoning": ModelProfile(
         name="strong_reasoning",
         max_input_tokens=24000,
@@ -61,3 +114,16 @@ MODEL_PROFILES = {
 
 def get_model_profile(name: str) -> ModelProfile:
     return MODEL_PROFILES.get(name, MODEL_PROFILES["qwen3_128k_weak"])
+
+
+def get_task_specific_profile(default_name: str, task_type: str) -> ModelProfile:
+    if default_name.startswith("qwen3"):
+        if task_type in {"generate_bff_oracle_sql_logic", "classify_query_intent", "infer_placeholder_meaning"}:
+            return MODEL_PROFILES["qwen3_sql"]
+        if task_type in {"generate_react_pseudo_ui", "generate_react_reference_ui"}:
+            return MODEL_PROFILES["qwen3_ui"]
+        if task_type in {"integrate_react_transition_ui"}:
+            return MODEL_PROFILES["qwen3_integration"]
+        if task_type in {"validate_transition_spec"}:
+            return MODEL_PROFILES["qwen3_validation"]
+    return get_model_profile(default_name)

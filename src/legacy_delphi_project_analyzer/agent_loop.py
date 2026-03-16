@@ -17,6 +17,7 @@ from legacy_delphi_project_analyzer.orchestrator import (
     rerun_analysis_from_runtime_state,
 )
 from legacy_delphi_project_analyzer.retry_planner import build_retry_plan, classify_validation_failure, write_retry_plan
+from legacy_delphi_project_analyzer.runtime_errors import write_runtime_error_summary
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 from legacy_delphi_project_analyzer.validators import validate_evidence, validate_schema
 from legacy_delphi_project_analyzer.utils import ensure_directory, write_json, write_text
@@ -286,6 +287,12 @@ def validate_task_response(
     ]
     _write_validation_record(analysis_dir / "runtime", task_dir, record)
     write_retry_plan(task_dir, retry_plan)
+    bundle = load_runtime_bundle(analysis_dir)
+    write_runtime_error_summary(
+        analysis_dir=analysis_dir,
+        runtime_dir=analysis_dir / "runtime",
+        blockers=bundle["blocking_unknowns"],
+    )
     return record
 
 

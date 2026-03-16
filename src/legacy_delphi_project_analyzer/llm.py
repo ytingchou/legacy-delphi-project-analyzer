@@ -36,6 +36,8 @@ def validate_openai_compatible_provider(
         "completion_ok": False,
         "selected_model": None,
         "response_preview": None,
+        "response_format": None,
+        "response_content_type": None,
         "debug": [],
         "ok": False,
     }
@@ -80,7 +82,11 @@ def validate_openai_compatible_provider(
             response_text = _extract_response_text(completion_payload)
             result["completion_ok"] = True
             result["response_preview"] = response_text[:240]
+            result["response_format"] = completion_payload.get("_response_format")
+            result["response_content_type"] = completion_payload.get("_response_content_type")
             result["debug"].append(f"Chat completion endpoint reachable: {chat_endpoint}")
+            if result["response_content_type"]:
+                result["debug"].append(f"Response content type: {result['response_content_type']}")
         except ValueError as exc:
             result["debug"].append(str(exc))
     elif perform_completion and not selected_model:
@@ -411,6 +417,8 @@ def _request_provider_json(
     request = urllib.request.Request(endpoint, data=body if payload is not None else None, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            headers = getattr(response, "headers", None)
+            content_type = headers.get("Content-Type") if headers is not None and hasattr(headers, "get") else None
             raw_body = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
@@ -433,6 +441,10 @@ def _request_provider_json(
         ) from exc
     if not isinstance(response_payload, dict):
         raise ValueError(f"Provider {method} {endpoint} response must be a JSON object.")
+    if content_type:
+        response_payload["_response_content_type"] = content_type
+        if "text/event-stream" in content_type.lower():
+            response_payload["_response_format"] = response_payload.get("_response_format") or "sse"
     return response_payload
 
 

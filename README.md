@@ -26,6 +26,11 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Runtime orchestration outputs for multi-phase loops, blocker queues, and resumable handoff state
 - Qwen3-oriented model profiles, task packs, and file-based Cline inbox/outbox integration
 - Generated Cline cheat sheets for the fastest manual weak-model workflow
+- Bundled Cline wrapper runner with JSON repair, auto-validation, and retry-plan follow-up
+- Structured runtime error summaries, provider health persistence, and human review records
+- Weak-model prompt profiles for SQL, UI, integration, and validation tasks
+- Web workbench enhancements for task queue, runtime errors, provider health, and human review
+- VSCode Cline helper files per task pack for the fastest extension-based workflow
 - Response validators, validator-driven retry plans, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
 
 ## Usage
@@ -81,6 +86,14 @@ Build blocker task packs for Cline or later loop execution:
 legacy-delphi-analyzer build-taskpacks /path/to/artifacts --max-tasks 5
 ```
 
+Run the bundled Cline wrapper against the file-based inbox:
+
+```bash
+legacy-delphi-analyzer run-cline-wrapper /path/to/artifacts \
+  --cline-cmd cline chat \
+  --watch
+```
+
 Regenerate the built-in Cline quick-start cheat sheets:
 
 ```bash
@@ -92,6 +105,7 @@ Validate one task response against its schema and the recovered legacy evidence:
 ```bash
 legacy-delphi-analyzer validate-response /path/to/artifacts task-query-orderlookup-placeholders
 legacy-delphi-analyzer retry-plan /path/to/artifacts task-query-orderlookup-placeholders
+legacy-delphi-analyzer review-task /path/to/artifacts task-query-orderlookup-placeholders --decision accept --reviewer qa
 ```
 
 Run or resume the bounded orchestration loop:
@@ -180,11 +194,53 @@ Validate that an OpenAI-compatible provider is reachable before running loops:
 ```bash
 legacy-delphi-analyzer validate-provider \
   --provider-base-url http://your-provider-host:8000/v1 \
-  --model qwen3-32b
+  --model qwen3-32b \
+  --analysis-dir /path/to/artifacts
 ```
 
 This probes both `/models` and `/chat/completions`, then prints reachable endpoints,
 listed models, response previews, and actionable debug lines when something fails.
+When `--analysis-dir` is supplied the result is also saved to
+`runtime/provider-health.json` for the web workbench and runtime error summary.
+
+## Cline Bridge
+
+The bundled Cline bridge is designed for weak internal models and file-based handoff.
+It can:
+
+- watch `runtime/cline-inbox/`
+- run an external `cline` command
+- sanitize noisy output
+- attempt one JSON repair pass
+- save `runtime/cline-outbox/<task-id>/response.json`
+- run `validate-response`
+- consume `retry-plan.json` for one bounded repair attempt
+
+This is the fastest way to connect analyzer task packs to your company Cline CLI.
+
+## VSCode Cline Helper Files
+
+Each task pack now includes:
+
+- `vscode-cline-quick-open.md`
+- `vscode-cline-copy-prompt.txt`
+- `vscode-cline-response-template.json`
+- `primary-prompt.txt`
+- `fallback-prompt.txt`
+- `verification-prompt.txt`
+
+These files are designed for VSCode Cline extension users who want the smallest
+possible per-task workflow.
+
+## Web Workbench
+
+The HTML report now includes a runtime workbench view with:
+
+- task queue
+- provider health
+- runtime error summary
+- human review summary
+- direct bounded-workflow guidance for Cline users
 
 ## v2.2 Validator-Driven Retry
 

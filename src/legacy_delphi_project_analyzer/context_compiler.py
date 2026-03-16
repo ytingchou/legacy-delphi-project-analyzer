@@ -33,11 +33,15 @@ def compile_task_context(
     profile = get_model_profile(taskpack.target_model_profile)
     trusted_facts = _trusted_facts(analysis_dir, taskpack)
     validator_feedback = _last_validator_feedback(task_dir)
+    limits = _task_compact_limits(taskpack.task_type)
     evidence_snippets, included_paths, skipped_paths = _collect_evidence(
         taskpack.context_paths,
-        max_paths=profile.max_context_paths,
-        max_tokens=profile.max_input_tokens,
+        max_paths=min(profile.max_context_paths, limits["max_paths"]),
+        max_tokens=min(profile.max_input_tokens, limits["max_tokens"]),
+        max_snippets=limits["max_snippets"],
     )
+    trusted_facts = trusted_facts[: limits["max_facts"]]
+    validator_feedback = validator_feedback[: limits["max_feedback"]]
     markdown = _render_compiled_markdown(taskpack, trusted_facts, validator_feedback, evidence_snippets)
     payload = {
         "name": taskpack.task_id,
@@ -69,7 +73,9 @@ def compile_task_context(
             "skipped_paths": skipped_paths,
             "trusted_facts": trusted_facts,
             "validator_feedback": validator_feedback,
+            "minimal_evidence": evidence_snippets,
             "evidence_snippets": evidence_snippets,
+            "compact_limits": limits,
         },
     )
     payload["context_paths"] = [compiled_md_path.as_posix()]
@@ -151,12 +157,16 @@ def _collect_evidence(
     *,
     max_paths: int,
     max_tokens: int,
+    max_snippets: int,
 ) -> tuple[list[str], list[str], list[str]]:
     snippets: list[str] = []
     included_paths: list[str] = []
     skipped_paths: list[str] = []
     current_tokens = 0
     for raw_path in context_paths:
+        if len(snippets) >= max_snippets:
+            skipped_paths.append(raw_path)
+            continue
         if len(included_paths) >= max_paths:
             skipped_paths.append(raw_path)
             continue
@@ -211,3 +221,19 @@ def _render_compiled_markdown(
     lines.extend(evidence_snippets or ["No evidence snippets available."])
     lines.extend(["", "## Prompt", "", "```text", taskpack.primary_prompt or "", "```", ""])
     return "\n".join(lines)
+
+
+def _task_compact_limits(task_type: str) -> dict[str, int]:
+    if task_type == "infer_placeholder_meaning":
+        return {"max_tokens": 4000, "max_paths": 2, "max_snippets": 2, "max_facts": 3, "max_feedback": 1}
+    if task_type == "classify_query_intent":
+        return {"max_tokens": 5000, "max_paths": 3, "max_snippets": 3, "max_facts": 4, "max_feedback": 1}
+    if task_type == "validate_transition_spec":
+        return {"max_tokens": 6000, "max_paths": 3, "max_snippets": 3, "max_facts": 5, "max_feedback": 2}
+    if task_type in {"generate_react_pseudo_ui", "generate_react_reference_ui"}:
+        return {"max_tokens": 6000, "max_paths": 3, "max_snippets": 3, "max_facts": 5, "max_feedback": 1}
+    if task_type == "integrate_react_transition_ui":
+        return {"max_tokens": 7000, "max_paths": 3, "max_snippets": 2, "max_facts": 4, "max_feedback": 2}
+    if task_type == "generate_bff_oracle_sql_logic":
+        return {"max_tokens": 5500, "max_paths": 3, "max_snippets": 3, "max_facts": 4, "max_feedback": 1}
+    return {"max_tokens": 9000, "max_paths": 4, "max_snippets": 4, "max_facts": 6, "max_feedback": 2}

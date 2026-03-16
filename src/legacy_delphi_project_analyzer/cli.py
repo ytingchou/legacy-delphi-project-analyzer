@@ -7,8 +7,10 @@ from pathlib import Path
 
 from legacy_delphi_project_analyzer.benchmarking import benchmark_prompts
 from legacy_delphi_project_analyzer.cheatsheet import write_analysis_cheat_sheet, write_runtime_cheat_sheet
+from legacy_delphi_project_analyzer.cline_bridge import run_cline_wrapper
 from legacy_delphi_project_analyzer.console import CliReporter, render_cli_exception
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
+from legacy_delphi_project_analyzer.human_review import record_task_review
 from legacy_delphi_project_analyzer.llm import run_llm_artifact, validate_openai_compatible_provider
 from legacy_delphi_project_analyzer.cline import emit_cline_task
 from legacy_delphi_project_analyzer.delivery import deliver_slices
@@ -28,6 +30,7 @@ from legacy_delphi_project_analyzer.orchestrator import (
     run_phases,
 )
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
+from legacy_delphi_project_analyzer.runtime_errors import save_provider_health
 from legacy_delphi_project_analyzer.subagents import run_subagent_batches
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 from legacy_delphi_project_analyzer.target_integration import build_target_project_integration_pack
@@ -163,6 +166,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
 
+    wrapper_parser = subparsers.add_parser(
+        "run-cline-wrapper",
+        help="Watch the file-based Cline inbox, run an external Cline CLI command, and auto-validate responses.",
+    )
+    wrapper_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    wrapper_parser.add_argument(
+        "--cline-cmd",
+        nargs="+",
+        required=True,
+        help="External Cline command. Use {prompt_file} in one argument if your CLI needs a prompt file path instead of stdin.",
+    )
+    wrapper_parser.add_argument("--watch", action="store_true", help="Continuously watch the inbox for new tasks.")
+    wrapper_parser.add_argument("--once", action="store_true", help="Process currently available tasks once and exit.")
+    wrapper_parser.add_argument("--resume", action="store_true", help="Revisit tasks that are not already accepted.")
+    wrapper_parser.add_argument(
+        "--no-skip-accepted",
+        action="store_true",
+        help="Do not skip tasks that already have accepted validation results.",
+    )
+    wrapper_parser.add_argument("--streaming", action="store_true", help="Read the external Cline command as a streaming stdout process.")
+    wrapper_parser.add_argument("--timeout-seconds", type=int, default=180, help="Execution timeout for each Cline command.")
+    wrapper_parser.add_argument("--poll-seconds", type=float, default=1.0, help="Polling interval used by watch mode.")
+    wrapper_parser.add_argument("--no-sanitize-output", action="store_true", help="Disable stdout cleanup before JSON extraction.")
+    wrapper_parser.add_argument("--no-validate-after-run", action="store_true", help="Do not run validate-response automatically.")
+    wrapper_parser.add_argument("--no-retry-on-fail", action="store_true", help="Do not use retry-plan repair prompts after validation failure.")
+
     dispatch_task_parser = subparsers.add_parser(
         "dispatch-task",
         help="Dispatch one generated task pack to the file-based Cline inbox.",
@@ -260,6 +289,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-completion",
         action="store_true",
         help="Only check the models endpoint and skip the sample chat completion probe.",
+    )
+    provider_probe_parser.add_argument(
+        "--analysis-dir",
+        default=None,
+        help="Optional analysis directory. When supplied, the provider probe is persisted under runtime/provider-health.json.",
+    )
+
+    review_parser = subparsers.add_parser(
+        "review-task",
+        help="Record a human decision for a task response and optionally fold accepted output back into feedback learning.",
+    )
+    review_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    review_parser.add_argument("task_id", help="Task ID under runtime/taskpacks/ to review.")
+    review_parser.add_argument(
+        "--decision",
+        required=True,
+        choices=["accept", "reject", "escalate", "trim"],
+        help="Human review decision to record.",
+    )
+    review_parser.add_argument("--notes", default=None, help="Optional reviewer notes.")
+    review_parser.add_argument("--reviewer", default=None, help="Optional reviewer name or handle.")
+    review_parser.add_argument(
+        "--response-file",
+        default=None,
+        help="Optional response JSON path. Defaults to runtime/taskpacks/<task-id>/agent-response.json.",
     )
 
     codegen_parser = subparsers.add_parser(
@@ -374,11 +428,13 @@ def build_parser() -> argparse.ArgumentParser:
         resume_loop_parser,
         loop_status_parser,
         benchmark_parser,
+        wrapper_parser,
         dispatch_task_parser,
         report_parser,
         feedback_parser,
         llm_parser,
         provider_probe_parser,
+        review_parser,
         codegen_parser,
         target_pack_parser,
         bff_compiler_parser,
@@ -564,6 +620,22 @@ def _run_command(args, reporter: CliReporter) -> int:
             reporter.info("Debug:")
             for item in result["debug"]:
                 reporter.info(f"- {item}")
+        if args.analysis_dir:
+            analysis_dir = Path(args.analysis_dir).resolve()
+            runtime_dir = analysis_dir / "runtime"
+            save_provider_health(runtime_dir, result)
+            reporter.info(f"Provider health saved: {runtime_dir / 'provider-health.json'}")
+            bundle = load_runtime_bundle(analysis_dir)
+            run_state = bundle["run_state"]
+            if run_state is not None:
+                output = rerun_analysis_from_runtime_state(analysis_dir)
+                refresh_runtime_artifacts(
+                    output,
+                    target_model_profile=run_state.target_model_profile,
+                    dispatch_mode=run_state.dispatch_mode,
+                    analysis_config=run_state.analysis_config,
+                    provider_config=run_state.provider_config,
+                )
         if not result["ok"]:
             return 1
         return 0
@@ -646,6 +718,53 @@ def _run_command(args, reporter: CliReporter) -> int:
         reporter.info(
             f"Prompt benchmark complete: {len(report['prompt_benchmark'])} prompt rows, "
             f"{len(report['goal_summary'])} goals"
+        )
+        return 0
+    if args.command == "run-cline-wrapper":
+        reporter.progress("Running bundled Cline wrapper")
+        result = run_cline_wrapper(
+            analysis_dir=Path(args.analysis_dir),
+            cline_cmd=args.cline_cmd,
+            watch=args.watch,
+            once=args.once,
+            resume=args.resume,
+            skip_accepted=not args.no_skip_accepted,
+            streaming=args.streaming,
+            sanitize_output=not args.no_sanitize_output,
+            validate_after_run=not args.no_validate_after_run,
+            retry_on_fail=not args.no_retry_on_fail,
+            timeout_seconds=args.timeout_seconds,
+            poll_seconds=args.poll_seconds,
+        )
+        reporter.info(
+            f"Cline wrapper complete: processed={result['processed']}, repaired={result['repaired']}, "
+            f"last_task={result['last_task_id'] or 'None'}"
+        )
+        return 0
+    if args.command == "review-task":
+        reporter.progress("Recording task review")
+        record = record_task_review(
+            analysis_dir=Path(args.analysis_dir),
+            task_id=args.task_id,
+            decision=args.decision,
+            notes=args.notes,
+            reviewer=args.reviewer,
+            response_file=Path(args.response_file) if args.response_file else None,
+        )
+        analysis_dir = Path(args.analysis_dir).resolve()
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is not None:
+            output = rerun_analysis_from_runtime_state(analysis_dir)
+            refresh_runtime_artifacts(
+                output,
+                target_model_profile=run_state.target_model_profile,
+                dispatch_mode=run_state.dispatch_mode,
+                analysis_config=run_state.analysis_config,
+                provider_config=run_state.provider_config,
+            )
+        reporter.info(
+            f"Review recorded: task={record['task_id']}, decision={record['decision']}, reviewer={record['reviewer'] or 'n/a'}"
         )
         return 0
     if args.command == "build-cheatsheet":

@@ -168,6 +168,12 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         "prompt_packs": output.prompt_packs,
         "failure_triage": output.failure_triage,
         "prompt_effectiveness_report": output.prompt_effectiveness_report,
+        "runtime_state": output.runtime_state,
+        "blocking_unknowns": output.blocking_unknowns,
+        "artifact_completeness": output.artifact_completeness,
+        "runtime_error_summary": output.runtime_error_summary,
+        "provider_health": output.provider_health,
+        "review_summary": output.review_summary,
         "diagnostic_count": len(output.diagnostics),
     }
     data_json = json.dumps(to_jsonable(payload), ensure_ascii=False)
@@ -188,6 +194,16 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         ("BFF SQL", str(len(output.bff_sql_artifacts)), "Oracle handoff slices"),
         ("Pseudo UI", str(len(output.ui_pseudo_artifacts)), "Page-level UI plans"),
         ("UI Integration", str(len(output.ui_integration_artifacts)), "React project handoff"),
+        (
+            "Runtime Blockers",
+            str(len(output.blocking_unknowns)),
+            "Current task queue",
+        ),
+        (
+            "Runtime Errors",
+            str((output.runtime_error_summary or {}).get("item_count", 0)),
+            "Recovery hints",
+        ),
         (
             "Prompt Success",
             (
@@ -274,6 +290,11 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         for item in output.ui_integration_artifacts
     )
     prompt_effectiveness = output.prompt_effectiveness_report
+    runtime_state = output.runtime_state
+    blocking_unknowns = list(output.blocking_unknowns or [])
+    runtime_errors = output.runtime_error_summary or {"items": []}
+    provider_health = output.provider_health or {}
+    review_summary = output.review_summary or {"total_reviews": 0, "counts_by_decision": {}, "recent_reviews": []}
     prompt_rows = ""
     prompt_summary_markup = "<li>No prompt feedback has been imported yet.</li>"
     if prompt_effectiveness is not None:
@@ -299,6 +320,57 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         prompt_summary_markup = "\n".join(
             f"<li>{escape(item)}</li>" for item in prompt_effectiveness.management_summary
         ) or "<li>No prompt feedback has been imported yet.</li>"
+    task_queue_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.task_id)}</td>
+          <td>{escape(item.task_type)}</td>
+          <td>{escape(item.module_name or 'None')}</td>
+          <td>{escape(item.subject_name or 'None')}</td>
+          <td>{item.priority}</td>
+          <td>{escape(item.reason or 'None')}</td>
+        </tr>
+        """
+        for item in blocking_unknowns[:12]
+    ) or """
+        <tr><td colspan="6">No active blockers.</td></tr>
+    """
+    runtime_error_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('code') or 'UNKNOWN'))}</td>
+          <td>{escape(str(item.get('severity') or 'unknown'))}</td>
+          <td>{escape(str(item.get('task_id') or 'n/a'))}</td>
+          <td>{escape(str(item.get('title') or 'Unknown'))}</td>
+          <td>{escape(str(item.get('next_best_action') or 'None'))}</td>
+        </tr>
+        """
+        for item in runtime_errors.get("items", [])[:12]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="5">No runtime errors recorded.</td></tr>
+    """
+    provider_health_markup = "\n".join(
+        [
+            f"<li>Models OK: {escape(str(provider_health.get('models_ok')).lower())}</li>",
+            f"<li>Completion OK: {escape(str(provider_health.get('completion_ok')).lower())}</li>",
+            f"<li>Selected model: {escape(str(provider_health.get('selected_model') or 'None'))}</li>",
+            f"<li>Response format: {escape(str(provider_health.get('response_format') or 'unknown'))}</li>",
+            f"<li>Content type: {escape(str(provider_health.get('response_content_type') or 'unknown'))}</li>",
+        ]
+    ) if provider_health else "<li>No provider health probe recorded yet.</li>"
+    review_markup = "\n".join(
+        f"<li>{escape(str(key))}: {value}</li>"
+        for key, value in sorted((review_summary.get("counts_by_decision") or {}).items())
+    ) or "<li>No human reviews recorded yet.</li>"
+    runtime_summary_markup = "\n".join(
+        [
+            f"<li>Status: {escape(runtime_state.status)}</li>" if runtime_state else "<li>Status: unknown</li>",
+            f"<li>Current phase: {escape(runtime_state.current_phase)}</li>" if runtime_state else "<li>Current phase: unknown</li>",
+            f"<li>Dispatch mode: {escape(runtime_state.dispatch_mode)}</li>" if runtime_state else "<li>Dispatch mode: unknown</li>",
+            f"<li>Blocking task: {escape(runtime_state.blocking_task_id or 'None')}</li>" if runtime_state else "<li>Blocking task: None</li>",
+        ]
+    )
     return f"""<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -504,6 +576,79 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             <li>Total prompt packs: {len(output.prompt_packs)}</li>
             <li>Feedback entries: {prompt_effectiveness.total_feedback_entries if prompt_effectiveness else 0}</li>
             <li>Fallback uses: {prompt_effectiveness.fallback_entries if prompt_effectiveness else 0}</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Runtime Workbench</h2>
+          <ul>{runtime_summary_markup}</ul>
+          <ul>
+            <li>Fast path: open <code>runtime/cline-cheat-sheet.md</code>.</li>
+            <li>Per task, use only <code>agent-task.md</code>, <code>compiled-context.md</code>, and <code>agent-expected-output-schema.json</code>.</li>
+            <li>Save JSON to <code>agent-response.json</code>, then run <code>validate-response</code>.</li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h2>Provider Health</h2>
+          <ul>{provider_health_markup}</ul>
+          <ul>
+            <li>Use <code>validate-provider --analysis-dir ... --verbose</code> after provider changes.</li>
+            <li>If the provider reports SSE, prefer the bundled wrapper streaming mode.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="panel stack">
+        <div>
+          <h2>Task Queue</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Task ID</th>
+                  <th>Type</th>
+                  <th>Module</th>
+                  <th>Subject</th>
+                  <th>Priority</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {task_queue_rows}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Runtime Errors</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Severity</th>
+                  <th>Task</th>
+                  <th>Title</th>
+                  <th>Next Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runtime_error_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Human Review</h2>
+          <ul>{review_markup}</ul>
+          <ul>
+            <li>Use <code>review-task</code> to accept, reject, trim, or escalate a task output.</li>
+            <li>Accepted reviews can be folded back into feedback learning for later runs.</li>
           </ul>
         </article>
       </section>

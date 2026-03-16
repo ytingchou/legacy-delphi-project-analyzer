@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from legacy_delphi_project_analyzer.model_profiles import ModelProfile, get_model_profile
+from legacy_delphi_project_analyzer.model_profiles import ModelProfile, get_model_profile, get_task_specific_profile
 from legacy_delphi_project_analyzer.phase_state import BlockingUnknown, RunState
 from legacy_delphi_project_analyzer.utils import ensure_directory, estimate_tokens, read_text_file, slugify, write_json, write_text
 
@@ -38,12 +38,12 @@ def build_taskpacks(
     *,
     max_tasks: int | None = None,
 ) -> list[TaskPack]:
-    profile = get_model_profile(run_state.target_model_profile)
     blockers: list[BlockingUnknown] = list(output.blocking_unknowns or [])
     prompt_index = _build_prompt_index(output)
     taskpacks: list[TaskPack] = []
 
     for blocker in blockers:
+        profile = get_task_specific_profile(run_state.target_model_profile, blocker.task_type)
         payload = _match_task_payload(blocker, prompt_index)
         if payload is None:
             continue
@@ -141,6 +141,9 @@ def write_taskpacks(
         )
         write_json(task_dir / "agent-expected-output-schema.json", taskpack.expected_output_schema)
         write_json(task_dir / "agent-acceptance-checks.json", {"checks": taskpack.acceptance_checks})
+        write_text(task_dir / "primary-prompt.txt", taskpack.primary_prompt or "")
+        write_text(task_dir / "fallback-prompt.txt", taskpack.fallback_prompt or "")
+        write_text(task_dir / "verification-prompt.txt", taskpack.verification_prompt or "")
         write_json(
             task_dir / "agent-handoff-template.json",
             {
@@ -155,6 +158,20 @@ def write_taskpacks(
             },
         )
         write_json(task_dir / "taskpack.json", taskpack_to_llm_payload(taskpack))
+        write_text(task_dir / "vscode-cline-quick-open.md", _render_vscode_quick_open(taskpack))
+        write_text(task_dir / "vscode-cline-copy-prompt.txt", _render_vscode_copy_prompt(taskpack))
+        write_json(
+            task_dir / "vscode-cline-response-template.json",
+            {
+                "task_id": taskpack.task_id,
+                "status": "completed",
+                "result": {},
+                "supported_claims": [],
+                "unsupported_claims": [],
+                "remaining_unknowns": [],
+                "recommended_next_task": "",
+            },
+        )
         index_payload.append(
             {
                 "task_id": taskpack.task_id,
@@ -364,3 +381,43 @@ def _bullet_lines(values: list[str]) -> str:
     if not values:
         return "- None"
     return "\n".join(f"- {item}" for item in values)
+
+
+def _render_vscode_quick_open(taskpack: TaskPack) -> str:
+    return f"""# VSCode Cline Quick Open
+
+Open these files in order:
+
+1. `agent-task.md`
+2. `compiled-context.md` if it exists, otherwise `agent-context-manifest.json`
+3. `agent-expected-output-schema.json`
+
+Task:
+
+- Task ID: `{taskpack.task_id}`
+- Task type: `{taskpack.task_type}`
+- Module: `{taskpack.module_name or 'None'}`
+- Subject: `{taskpack.subject_name or 'None'}`
+
+Rules:
+
+- Start a fresh Cline chat for this task only.
+- Output JSON only.
+- Save the result into `agent-response.json`.
+"""
+
+
+def _render_vscode_copy_prompt(taskpack: TaskPack) -> str:
+    return (
+        "你現在只做一個 bounded task。\n\n"
+        "請先讀這三個檔案：\n"
+        "1. agent-task.md\n"
+        "2. compiled-context.md\n"
+        "3. agent-expected-output-schema.json\n\n"
+        "規則：\n"
+        "- 只輸出 JSON\n"
+        "- 不要輸出 markdown\n"
+        "- 不要加入 schema 外欄位\n"
+        "- 如果不確定，放到 remaining_unknowns 或 missing_assumptions\n\n"
+        f"Primary task:\n{taskpack.primary_prompt or ''}\n"
+    )

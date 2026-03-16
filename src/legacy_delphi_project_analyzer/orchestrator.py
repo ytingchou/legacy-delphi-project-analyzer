@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from legacy_delphi_project_analyzer.cheatsheet import write_runtime_cheat_sheet
+from legacy_delphi_project_analyzer.human_review import build_review_summary
 from legacy_delphi_project_analyzer.phase_state import (
     ArtifactCompleteness,
     LoopMetrics,
@@ -30,6 +31,12 @@ from legacy_delphi_project_analyzer.phases import (
     determine_current_phase,
 )
 from legacy_delphi_project_analyzer.pipeline import run_analysis
+from legacy_delphi_project_analyzer.reporting import build_web_report_html
+from legacy_delphi_project_analyzer.runtime_errors import (
+    load_provider_health,
+    load_review_summary,
+    write_runtime_error_summary,
+)
 from legacy_delphi_project_analyzer.utils import ensure_directory, write_json, write_text
 
 
@@ -205,12 +212,30 @@ def refresh_runtime_artifacts(
         blockers=blockers,
         completeness=completeness,
     )
+    runtime_error_summary = write_runtime_error_summary(
+        analysis_dir=output_root,
+        runtime_dir=runtime_dir,
+        blockers=blockers,
+    )
+    provider_health = load_provider_health(runtime_dir)
+    review_summary = load_review_summary(runtime_dir)
+    if review_summary is None:
+        review_history = _load_json(runtime_dir / "reviews" / "review-history.json")
+        if isinstance(review_history, list):
+            review_summary = build_review_summary(review_history)
+            write_json(runtime_dir / "reviews" / "review-summary.json", review_summary)
 
     output.runtime_state = run_state
     output.phase_states = phase_states
     output.blocking_unknowns = blockers
     output.artifact_completeness = completeness
     output.loop_metrics = metrics
+    output.runtime_error_summary = runtime_error_summary
+    output.provider_health = provider_health
+    output.review_summary = review_summary
+    report_dir = output_root / "report"
+    if report_dir.exists():
+        write_text(report_dir / "index.html", build_web_report_html(output))
     return run_state
 
 

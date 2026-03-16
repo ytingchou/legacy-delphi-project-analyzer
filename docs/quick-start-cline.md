@@ -25,6 +25,7 @@ Run:
 legacy-delphi-analyzer run-phases /path/to/project --output-dir /path/to/artifacts
 legacy-delphi-analyzer build-taskpacks /path/to/artifacts
 legacy-delphi-analyzer build-cheatsheet /path/to/artifacts
+legacy-delphi-analyzer run-cline-wrapper /path/to/artifacts --cline-cmd cline chat --watch
 ```
 
 If you are using an OpenAI-compatible provider behind Cline, verify it first:
@@ -63,6 +64,7 @@ The only files you should copy into Cline for the first attempt are:
 - `agent-task.md`
 - `compiled-context.md`
 - `agent-expected-output-schema.json`
+- `vscode-cline-copy-prompt.txt` if you want a ready-made bounded prompt
 
 Do not paste the full `taskpack.json`.
 Do not paste unrelated module artifacts.
@@ -171,6 +173,12 @@ runtime/taskpacks/<task-id>/agent-response.json
 
 Do not use one Cline chat for multiple task IDs.
 Open a fresh chat per task.
+
+The fastest extension-friendly files are:
+
+- `vscode-cline-quick-open.md`
+- `vscode-cline-copy-prompt.txt`
+- `vscode-cline-response-template.json`
 
 ## 6. Save The Response In The Right Shape
 
