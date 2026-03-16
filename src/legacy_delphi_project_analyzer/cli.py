@@ -16,6 +16,7 @@ from legacy_delphi_project_analyzer.agent_loop import (
     validate_task_response,
 )
 from legacy_delphi_project_analyzer.codegen import generate_transition_code
+from legacy_delphi_project_analyzer.oracle_bff import compile_oracle_bff_sql
 from legacy_delphi_project_analyzer.orchestrator import (
     build_analysis_config,
     load_runtime_bundle,
@@ -252,6 +253,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=None,
         help="Optional output directory. Defaults to <analysis_dir>/llm-pack/target-integration.",
+    )
+
+    bff_compiler_parser = subparsers.add_parser(
+        "compile-bff-sql",
+        help="Compile Oracle 19c BFF SQL endpoint packs from generated BFF artifacts.",
+    )
+    bff_compiler_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    bff_compiler_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/bff-sql-compiler.",
     )
     return parser
 
@@ -491,6 +503,17 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Target integration pack complete: {len(manifest['entries'])} entries, "
             f"target={manifest['target_project_dir']}"
+        )
+        return 0
+    if args.command == "compile-bff-sql":
+        manifest = compile_oracle_bff_sql(
+            Path(args.analysis_dir),
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        print(
+            f"Oracle BFF compiler complete: {manifest['summary']['entry_count']} entries, "
+            f"read={manifest['summary']['read_endpoints']}, "
+            f"command={manifest['summary']['command_endpoints']}"
         )
         return 0
     if args.command == "phase-status":

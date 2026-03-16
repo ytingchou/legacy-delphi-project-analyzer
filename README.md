@@ -103,6 +103,12 @@ Build a target-project integration pack against an existing React transition rep
 legacy-delphi-analyzer build-target-pack /path/to/artifacts /path/to/react-project
 ```
 
+Compile Oracle 19c BFF endpoint packs for Spring Boot implementation:
+
+```bash
+legacy-delphi-analyzer compile-bff-sql /path/to/artifacts
+```
+
 Serve the generated web report locally:
 
 ```bash
@@ -169,6 +175,20 @@ target-aware handoff artifacts under:
 These artifacts are intended for weak LLMs and Cline subagents that need to merge
 the generated UI into an already-existing transition project without loading the
 whole target repo into context.
+
+## v2.5 Oracle BFF Compiler
+
+The analyzer can now compile endpoint-sized Oracle BFF packs under:
+
+- `llm-pack/bff-sql-compiler/oracle-bff-manifest.json`
+- `llm-pack/bff-sql-compiler/oracle-bff-guide.md`
+- `llm-pack/bff-sql-compiler/*.md`
+- `llm-pack/bff-sql-compiler/*.json`
+
+These packs add operation kind detection, DTO-to-bind mappings, select-field summaries,
+pagination/sort heuristics, and semantic checks for unresolved placeholders and DML
+terminator rules. They are designed to give weak LLMs a smaller contract than the
+full transition spec plus full SQL artifact set.
 
 ## v1.0 Transition Specs
 

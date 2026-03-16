@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.5.0
+
+- Added Oracle 19c BFF SQL compiler packs with per-endpoint manifests and Markdown guides.
+- Added operation-kind detection, DTO-to-bind mapping, select-field extraction, and pagination/sort heuristics.
+- Added semantic checks for bind coverage, unresolved placeholders, DML terminators, and service-step complexity.
+- Added `compile-bff-sql` and regression coverage for compiled Oracle BFF artifacts.
+
 ## v2.4.0
 
 - Added target-project integration pack generation for existing React transition repositories.
