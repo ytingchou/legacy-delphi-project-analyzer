@@ -25,6 +25,7 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Compact BFF SQL logic artifacts for Spring Boot + Oracle 19c implementation handoff
 - Runtime orchestration outputs for multi-phase loops, blocker queues, and resumable handoff state
 - Qwen3-oriented model profiles, task packs, and file-based Cline inbox/outbox integration
+- Generated Cline cheat sheets for the fastest manual weak-model workflow
 - Response validators, validator-driven retry plans, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
 
 ## Usage
@@ -75,6 +76,12 @@ Build blocker task packs for Cline or later loop execution:
 
 ```bash
 legacy-delphi-analyzer build-taskpacks /path/to/artifacts --max-tasks 5
+```
+
+Regenerate the built-in Cline quick-start cheat sheets:
+
+```bash
+legacy-delphi-analyzer build-cheatsheet /path/to/artifacts
 ```
 
 Validate one task response against its schema and the recovered legacy evidence:
@@ -315,6 +322,8 @@ as `*BffSql` can be executed with `run-llm` to generate one bounded backend slic
 - `run-state.json`
 - `blocking-unknowns.json`
 - `artifact-completeness.json`
+- `cline-cheat-sheet.md`
+- `cline-cheat-sheet.json`
 - `state-summary.md`
 - `phase-delta.md`
 - `phases/<phase>/phase-status.json`
@@ -347,6 +356,8 @@ additional compact guides:
 
 - `llm-pack/backend-sql-manifest.json`
 - `llm-pack/backend-sql-guide.md`
+- `llm-pack/cline-cheat-sheet.md`
+- `llm-pack/cline-cheat-sheet.json`
 - `llm-pack/ui-handoff-manifest.json`
 - `llm-pack/ui-handoff-guide.md`
 
@@ -357,6 +368,7 @@ These files are deliberately small. They tell the weak model:
 - which endpoint or page to stay focused on
 - the estimated bundle token size
 - the exact next artifact paths to read
+- the exact response JSON wrapper to save back into `runtime/taskpacks/<task-id>/agent-response.json`
 
 ## v1.6 Feedback And Handoff Loop
 
@@ -380,6 +392,15 @@ Task packs are emitted under `artifacts/runtime/taskpacks/` and include:
 - `agent-expected-output-schema.json`
 - `agent-handoff-template.json`
 - `taskpack.json`
+
+If you only have time for the fastest manual workflow, open exactly these files per task:
+
+- `agent-task.md`
+- `compiled-context.md`
+- `agent-expected-output-schema.json`
+
+Then force Cline to return JSON only, save that JSON to
+`runtime/taskpacks/<task-id>/agent-response.json`, and run `validate-response`.
 
 Built-in model profiles currently include:
 

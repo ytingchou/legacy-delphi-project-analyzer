@@ -32,6 +32,7 @@ from legacy_delphi_project_analyzer.feedback import (
     build_prompt_effectiveness_report,
     render_prompt_effectiveness_markdown,
 )
+from legacy_delphi_project_analyzer.cheatsheet import write_analysis_cheat_sheet
 from legacy_delphi_project_analyzer.prompting import (
     build_repro_bundle_payload,
     build_failure_triage,
@@ -806,6 +807,22 @@ def package_analysis(
     write_json(llm_pack_dir / "load-plan.json", load_plan)
     manifest.append(
         _manifest_entry("load-plan", llm_pack_dir / "load-plan.json", ["bundle", "load-plan"])
+    )
+
+    cheat_sheet_paths = write_analysis_cheat_sheet(output)
+    manifest.append(
+        _manifest_entry(
+            "cline-cheat-sheet",
+            Path(cheat_sheet_paths["markdown_path"]),
+            ["cline", "cheat-sheet", "qwen"],
+        )
+    )
+    manifest.append(
+        _manifest_entry(
+            "cline-cheat-sheet-json",
+            Path(cheat_sheet_paths["json_path"]),
+            ["cline", "cheat-sheet", "json"],
+        )
     )
 
     prompt_pack_dir = output_root / "prompt-pack"

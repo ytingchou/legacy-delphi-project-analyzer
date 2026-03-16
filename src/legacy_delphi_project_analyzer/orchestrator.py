@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from legacy_delphi_project_analyzer.cheatsheet import write_runtime_cheat_sheet
 from legacy_delphi_project_analyzer.phase_state import (
     ArtifactCompleteness,
     LoopMetrics,
@@ -198,6 +199,12 @@ def refresh_runtime_artifacts(
     save_phase_states(runtime_dir, phase_states)
     _write_phase_summaries(runtime_dir, phase_states)
     _write_runtime_summary(runtime_dir, run_state, blockers, completeness, metrics)
+    write_runtime_cheat_sheet(
+        analysis_dir=output_root,
+        run_state=run_state,
+        blockers=blockers,
+        completeness=completeness,
+    )
 
     output.runtime_state = run_state
     output.phase_states = phase_states

@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.1.0
+
+- Added generated Cline quick-start cheat sheets under `llm-pack/cline-cheat-sheet.*` and `runtime/cline-cheat-sheet.*`.
+- Added `build-cheatsheet` to regenerate the cheat sheets from an existing analysis directory without rerunning the full migration workflow manually.
+- Added blocker-aware runtime cheat sheets with exact `dispatch-task`, `validate-response`, and `retry-plan` commands for the current top tasks.
+- Added regression coverage for cheat-sheet generation and the new CLI command.
+
 ## v3.0.2
 
 - Added fallback parsing for `text/event-stream` chat completion responses from OpenAI-compatible providers.

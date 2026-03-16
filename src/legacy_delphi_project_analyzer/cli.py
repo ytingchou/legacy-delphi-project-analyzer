@@ -6,6 +6,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from legacy_delphi_project_analyzer.benchmarking import benchmark_prompts
+from legacy_delphi_project_analyzer.cheatsheet import write_analysis_cheat_sheet, write_runtime_cheat_sheet
 from legacy_delphi_project_analyzer.console import CliReporter, render_cli_exception
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.llm import run_llm_artifact, validate_openai_compatible_provider
@@ -88,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional override for the runtime model profile when building task packs.",
     )
+
+    cheat_sheet_parser = subparsers.add_parser(
+        "build-cheatsheet",
+        help="Regenerate the Cline quick-start cheat sheets under llm-pack/ and runtime/.",
+    )
+    cheat_sheet_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
 
     validate_response_parser = subparsers.add_parser(
         "validate-response",
@@ -360,6 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
         phase_runner_parser,
         phase_status_parser,
         build_taskpacks_parser,
+        cheat_sheet_parser,
         validate_response_parser,
         retry_plan_parser,
         loop_parser,
@@ -639,6 +647,31 @@ def _run_command(args, reporter: CliReporter) -> int:
             f"Prompt benchmark complete: {len(report['prompt_benchmark'])} prompt rows, "
             f"{len(report['goal_summary'])} goals"
         )
+        return 0
+    if args.command == "build-cheatsheet":
+        reporter.progress("Regenerating Cline cheat sheets")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is None:
+            raise ValueError(f"Runtime state does not exist under {analysis_dir / 'runtime'}")
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        refresh_runtime_artifacts(
+            output,
+            target_model_profile=run_state.target_model_profile,
+            dispatch_mode=run_state.dispatch_mode,
+            analysis_config=run_state.analysis_config,
+            provider_config=run_state.provider_config,
+        )
+        analysis_paths = write_analysis_cheat_sheet(output)
+        runtime_paths = write_runtime_cheat_sheet(
+            analysis_dir=analysis_dir,
+            run_state=output.runtime_state,
+            blockers=output.blocking_unknowns,
+            completeness=output.artifact_completeness,
+        )
+        reporter.info(f"LLM cheat sheet: {analysis_paths['markdown_path']}")
+        reporter.info(f"Runtime cheat sheet: {runtime_paths['markdown_path']}")
         return 0
     if args.command == "generate-code":
         reporter.progress("Generating React and Spring Boot skeletons")
