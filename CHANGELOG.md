@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.4.0
+
+- Added target-project integration pack generation for existing React transition repositories.
+- Added target project inspection for feature directories, route files, API clients, state files, and known routes.
+- Added `build-target-pack` to emit target-aware integration manifests and per-page merge guides.
+- Added regression coverage for target-project feature and route detection.
+
 ## v2.3.0
 
 - Added prompt benchmarking and template-tuning reports under `runtime/prompt-benchmark.*`.

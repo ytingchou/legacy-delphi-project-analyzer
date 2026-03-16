@@ -97,6 +97,12 @@ Dispatch one task pack into the file-based Cline inbox:
 legacy-delphi-analyzer dispatch-task /path/to/artifacts task-query-orderlookup-placeholders
 ```
 
+Build a target-project integration pack against an existing React transition repo:
+
+```bash
+legacy-delphi-analyzer build-target-pack /path/to/artifacts /path/to/react-project
+```
+
 Serve the generated web report locally:
 
 ```bash
@@ -148,6 +154,21 @@ These reports combine task-pack metadata, validation history, and feedback histo
 to show which prompt families are stable, which ones still overrun weak-model
 capacity, and whether `primary`, `fallback`, or `verification` templates should
 be preferred by task type.
+
+## v2.4 Target Project Integration Packs
+
+You can now point the analyzer at a separate target React project. It will inspect
+existing feature directories, route files, API clients, and state files, then emit
+target-aware handoff artifacts under:
+
+- `llm-pack/target-integration/target-project-summary.json`
+- `llm-pack/target-integration/target-integration-manifest.json`
+- `llm-pack/target-integration/*.md`
+- `llm-pack/target-integration/*.json`
+
+These artifacts are intended for weak LLMs and Cline subagents that need to merge
+the generated UI into an already-existing transition project without loading the
+whole target repo into context.
 
 ## v1.0 Transition Specs
 

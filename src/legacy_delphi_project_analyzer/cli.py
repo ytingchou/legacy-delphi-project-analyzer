@@ -25,6 +25,7 @@ from legacy_delphi_project_analyzer.orchestrator import (
 )
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
+from legacy_delphi_project_analyzer.target_integration import build_target_project_integration_pack
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -239,6 +240,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-unvalidated",
         action="store_true",
         help="Generate skeletons even when validation results are missing.",
+    )
+
+    target_pack_parser = subparsers.add_parser(
+        "build-target-pack",
+        help="Compile target React project integration packs for generated UI artifacts.",
+    )
+    target_pack_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    target_pack_parser.add_argument("target_project_dir", help="Path to the target React project root.")
+    target_pack_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/target-integration.",
     )
     return parser
 
@@ -468,6 +481,17 @@ def main(argv: list[str] | None = None) -> int:
         base_dir = Path(args.output_dir).resolve() if args.output_dir else (Path(args.analysis_dir).resolve() / "codegen")
         print(f"Generated code skeletons: {len(generated)}")
         print(f"Output directory: {base_dir}")
+        return 0
+    if args.command == "build-target-pack":
+        manifest = build_target_project_integration_pack(
+            Path(args.analysis_dir),
+            Path(args.target_project_dir),
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        print(
+            f"Target integration pack complete: {len(manifest['entries'])} entries, "
+            f"target={manifest['target_project_dir']}"
+        )
         return 0
     if args.command == "phase-status":
         bundle = load_runtime_bundle(Path(args.analysis_dir))
