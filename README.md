@@ -40,6 +40,9 @@ Or after installation:
 legacy-delphi-analyzer analyze /path/to/project --output-dir artifacts
 ```
 
+If you need the fastest artifact-to-Cline workflow, start with
+[docs/quick-start-cline.md](/Users/housechou/vibe_coding/legacy-delphi-project-analyzer/docs/quick-start-cline.md).
+
 Most commands also support:
 
 - `--verbose` for extra debug details and full tracebacks on failure

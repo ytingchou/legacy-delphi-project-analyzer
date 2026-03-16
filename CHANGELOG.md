@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.1.1
+
+- Added a dedicated quick-start guide for using analyzer artifacts with Cline CLI and the VSCode Cline extension.
+- Documented the fastest manual weak-model workflow built around `run-phases`, `build-taskpacks`, `build-cheatsheet`, `validate-response`, and `retry-plan`.
+- Added copy/paste prompt templates for backend SQL, React UI, and React target-project integration tasks.
+
 ## v3.1.0
 
 - Added generated Cline quick-start cheat sheets under `llm-pack/cline-cheat-sheet.*` and `runtime/cline-cheat-sheet.*`.
