@@ -29,6 +29,13 @@ def benchmark_prompts(analysis_dir: Path) -> dict[str, Any]:
         if taskpack is None:
             continue
         prompt_name = taskpack.source_prompt_name or taskpack.task_id
+        records = [
+            item
+            for item in validation_results
+            if isinstance(item, dict) and str(item.get("task_id") or "") == taskpack.task_id
+        ]
+        if not records:
+            continue
         row = prompt_rows.setdefault(
             prompt_name,
             {
@@ -50,13 +57,6 @@ def benchmark_prompts(analysis_dir: Path) -> dict[str, Any]:
                 "tuning_actions": [],
             },
         )
-        records = [
-            item
-            for item in validation_results
-            if isinstance(item, dict) and str(item.get("task_id") or "") == taskpack.task_id
-        ]
-        if not records:
-            continue
         row["attempts"] += len(records)
         row["fallback_uses"] += sum(1 for item in records if item.get("prompt_mode") == "fallback")
         row["verification_uses"] += sum(1 for item in records if item.get("prompt_mode") == "verification")

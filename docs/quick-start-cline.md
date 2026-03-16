@@ -10,10 +10,10 @@ This guide is the fastest way to use `legacy-delphi-project-analyzer` artifacts 
 The goal is simple:
 
 1. Analyze the Delphi project.
-2. Generate small task packs.
+2. Generate task studio, session bundles, and small task packs.
 3. Feed only one task pack at a time into Cline.
 4. Save JSON output back into the artifact directory.
-5. Validate and retry if needed.
+5. Validate, retry, and reuse replay or patch-pack artifacts when needed.
 
 Do not load the whole repo or the whole `llm-pack/` into Cline.
 
@@ -23,8 +23,11 @@ Run:
 
 ```bash
 legacy-delphi-analyzer run-phases /path/to/project --output-dir /path/to/artifacts
-legacy-delphi-analyzer build-taskpacks /path/to/artifacts
+legacy-delphi-analyzer build-task-studio /path/to/artifacts
+legacy-delphi-analyzer build-cline-session /path/to/artifacts
 legacy-delphi-analyzer build-cheatsheet /path/to/artifacts
+legacy-delphi-analyzer build-patch-packs /path/to/artifacts
+legacy-delphi-analyzer evaluate-golden-tasks /path/to/artifacts
 legacy-delphi-analyzer run-cline-wrapper /path/to/artifacts --cline-cmd cline chat --watch
 ```
 
@@ -37,17 +40,21 @@ legacy-delphi-analyzer validate-provider \
   --verbose
 ```
 
-## 2. Open The Two Cheat Sheets
+## 2. Open The Fast Entry Files
 
 These files are now your fastest entry points:
 
 - `llm-pack/cline-cheat-sheet.md`
 - `runtime/cline-cheat-sheet.md`
+- `runtime/task-studio.md`
+- `runtime/cline-session/quick-start.md`
 
 Use:
 
 - `llm-pack/cline-cheat-sheet.md` for the overall workflow and prompt rules
 - `runtime/cline-cheat-sheet.md` for the current top blocker tasks and exact commands
+- `runtime/task-studio.md` for task status and exact validate/retry commands
+- `runtime/cline-session/quick-start.md` for prebuilt `prompt.txt` session bundles
 
 ## 3. Pick One Task Only
 
@@ -83,6 +90,12 @@ Then append this instruction:
 ```text
 只輸出 JSON，不要輸出 markdown，不要解釋，不要加入 schema 外的欄位。
 如果不確定，放到 remaining_unknowns 或 missing_assumptions。
+```
+
+If you want the most repeatable CLI path, use the generated session prompt directly:
+
+```bash
+cat /path/to/artifacts/runtime/cline-session/tasks/<task-id>/prompt.txt | cline chat
 ```
 
 ### Example: Backend SQL
@@ -179,6 +192,7 @@ The fastest extension-friendly files are:
 - `vscode-cline-quick-open.md`
 - `vscode-cline-copy-prompt.txt`
 - `vscode-cline-response-template.json`
+- `runtime/cline-session/tasks/<task-id>/prompt.txt`
 
 ## 6. Save The Response In The Right Shape
 
@@ -214,6 +228,11 @@ legacy-delphi-analyzer retry-plan /path/to/artifacts <task-id>
 
 Then feed `retry-plan.md` back into Cline and ask for a corrected JSON response.
 
+If the same task still fails, open:
+
+- `runtime/failure-replay/<task-id>/replay.md`
+- `runtime/failure-replay/<task-id>/manifest.json`
+
 ## 8. Task Order That Usually Works Best
 
 When time is short, do tasks in this order:
@@ -227,7 +246,22 @@ When time is short, do tasks in this order:
 
 This keeps the weak model on small, grounded tasks first.
 
-## 9. Recommended Artifact Families
+## 9. Task Studio, Patch Packs, and Golden Tasks
+
+Use these generated outputs to reduce trial-and-error:
+
+- `runtime/task-studio.md`
+  Shows task status plus validate/retry/review commands.
+- `runtime/cline-session/`
+  Contains prompt.txt, fallback-prompt.txt, and response-template.json per task.
+- `llm-pack/code-patch-packs/`
+  Contains bounded React and Spring Boot patch-oriented prompts.
+- `runtime/failure-replay/`
+  Contains replay bundles for tasks that failed validation.
+- `runtime/golden-tasks/golden-task-evaluation.md`
+  Shows which task types currently work best with your weak model.
+
+## 10. Recommended Artifact Families
 
 ### For Spring Boot BFF + Oracle 19c
 
@@ -256,11 +290,12 @@ Use:
 
 - `llm-pack/target-integration/*.md`
 - `llm-pack/target-integration/target-integration-manifest.json`
+- `llm-pack/target-integration/target-integration-assistant-manifest.json`
 - `llm-pack/ui-integration/*.md`
 
 Always keep it to one page integration step per prompt.
 
-## 10. Common Failure Modes
+## 11. Common Failure Modes
 
 ### Model returned markdown or prose instead of JSON
 
@@ -299,7 +334,7 @@ Use only:
 
 Do not add the larger bundle or the full business dossier unless the validator tells you the evidence is missing.
 
-## 11. Do Not Do These Things
+## 12. Do Not Do These Things
 
 - Do not paste the whole repo into Cline.
 - Do not paste the whole `llm-pack/`.
@@ -307,21 +342,22 @@ Do not add the larger bundle or the full business dossier unless the validator t
 - Do not mix backend SQL and UI work in one chat.
 - Do not accept non-JSON output as the final result.
 
-## 12. Minimal Team SOP
+## 13. Minimal Team SOP
 
 If your team needs the shortest operational path, use this every time:
 
 ```bash
 legacy-delphi-analyzer run-phases /path/to/project --output-dir /path/to/artifacts
-legacy-delphi-analyzer build-taskpacks /path/to/artifacts
+legacy-delphi-analyzer build-task-studio /path/to/artifacts
+legacy-delphi-analyzer build-cline-session /path/to/artifacts
 legacy-delphi-analyzer build-cheatsheet /path/to/artifacts
 ```
 
 Then:
 
-1. open `runtime/cline-cheat-sheet.md`
+1. open `runtime/task-studio.md`
 2. pick the first blocker task
-3. copy the 3 task-pack files into Cline
+3. open `runtime/cline-session/tasks/<task-id>/prompt.txt`
 4. save JSON to `agent-response.json`
 5. run `validate-response`
 6. if needed, run `retry-plan`

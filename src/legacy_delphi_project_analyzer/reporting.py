@@ -174,6 +174,12 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         "runtime_error_summary": output.runtime_error_summary,
         "provider_health": output.provider_health,
         "review_summary": output.review_summary,
+        "task_studio": output.task_studio,
+        "cline_session_manifest": output.cline_session_manifest,
+        "code_patch_packs": output.code_patch_packs,
+        "target_integration_assistant": output.target_integration_assistant,
+        "failure_replay_lab": output.failure_replay_lab,
+        "golden_task_evaluation": output.golden_task_evaluation,
         "diagnostic_count": len(output.diagnostics),
     }
     data_json = json.dumps(to_jsonable(payload), ensure_ascii=False)
@@ -191,6 +197,16 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         ("External Roots", str(len(output.inventory.external_roots)), "Shared legacy repos"),
         ("Missing Paths", str(len(output.inventory.missing_search_paths)), "Workspace gaps"),
         ("Prompt Packs", str(len(output.prompt_packs)), "Model-ready tasks"),
+        (
+            "Task Studio",
+            str((output.task_studio or {}).get("task_count", 0)),
+            "Bounded Cline tasks",
+        ),
+        (
+            "Patch Packs",
+            str(len(output.code_patch_packs)),
+            "Patch-oriented slices",
+        ),
         ("BFF SQL", str(len(output.bff_sql_artifacts)), "Oracle handoff slices"),
         ("Pseudo UI", str(len(output.ui_pseudo_artifacts)), "Page-level UI plans"),
         ("UI Integration", str(len(output.ui_integration_artifacts)), "React project handoff"),
@@ -214,6 +230,16 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             "Accepted prompt outcomes",
         ),
         ("Failure Cases", str(len(output.failure_triage)), "Minimal repro bundles"),
+        (
+            "Failure Replay",
+            str((output.failure_replay_lab or {}).get("entry_count", 0)),
+            "Replay bundles",
+        ),
+        (
+            "Golden Tasks",
+            str((output.golden_task_evaluation or {}).get("task_type_count", 0)),
+            "Weak-model scorecard",
+        ),
         ("Diagnostics", str(report.total_diagnostics), "Warnings + errors"),
         ("Unresolved", str(report.total_unresolved_placeholders), "Legacy placeholders"),
     ]
@@ -295,6 +321,11 @@ def build_web_report_html(output: AnalysisOutput) -> str:
     runtime_errors = output.runtime_error_summary or {"items": []}
     provider_health = output.provider_health or {}
     review_summary = output.review_summary or {"total_reviews": 0, "counts_by_decision": {}, "recent_reviews": []}
+    task_studio = output.task_studio or {"task_count": 0, "counts_by_status": {}, "tasks": []}
+    cline_session = output.cline_session_manifest or {"task_count": 0, "entries": []}
+    failure_replay = output.failure_replay_lab or {"entry_count": 0, "counts_by_category": {}, "entries": []}
+    golden_eval = output.golden_task_evaluation or {"task_type_count": 0, "leaderboard": [], "global_recommendations": []}
+    target_assistant = output.target_integration_assistant or {"entry_count": 0, "high_risk_count": 0, "entries": []}
     prompt_rows = ""
     prompt_summary_markup = "<li>No prompt feedback has been imported yet.</li>"
     if prompt_effectiveness is not None:
@@ -369,6 +400,77 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             f"<li>Current phase: {escape(runtime_state.current_phase)}</li>" if runtime_state else "<li>Current phase: unknown</li>",
             f"<li>Dispatch mode: {escape(runtime_state.dispatch_mode)}</li>" if runtime_state else "<li>Dispatch mode: unknown</li>",
             f"<li>Blocking task: {escape(runtime_state.blocking_task_id or 'None')}</li>" if runtime_state else "<li>Blocking task: None</li>",
+        ]
+    )
+    task_studio_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.get('task_id') or 'unknown')}</td>
+          <td>{escape(item.get('task_type') or 'unknown')}</td>
+          <td>{escape(item.get('status') or 'prepared')}</td>
+          <td>{escape(item.get('module_name') or 'None')}</td>
+          <td><code>{escape(item.get('validate_command') or '')}</code></td>
+        </tr>
+        """
+        for item in task_studio.get("tasks", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="5">No task studio entries generated yet.</td></tr>
+    """
+    patch_pack_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.module_name)}</td>
+          <td>{escape(item.slice_name)}</td>
+          <td>{escape(item.target_stack)}</td>
+          <td>{escape(item.patch_kind)}</td>
+          <td><code>{escape(item.prompt_file)}</code></td>
+        </tr>
+        """
+        for item in output.code_patch_packs[:12]
+    ) or """
+        <tr><td colspan="5">No code patch packs generated yet.</td></tr>
+    """
+    failure_replay_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('task_id') or 'unknown'))}</td>
+          <td>{escape(str(item.get('rejection_category') or 'unknown'))}</td>
+          <td>{escape(str(item.get('status') or 'unknown'))}</td>
+          <td><code>{escape(str(item.get('suggested_next_command') or ''))}</code></td>
+        </tr>
+        """
+        for item in failure_replay.get("entries", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="4">No failure replay entries generated yet.</td></tr>
+    """
+    golden_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('task_type') or 'unknown'))}</td>
+          <td>{escape(str(item.get('success_rate') or 0))}</td>
+          <td>{escape(str(item.get('avg_context_budget') or 0))}</td>
+          <td>{escape(str(item.get('recommendation') or ''))}</td>
+        </tr>
+        """
+        for item in golden_eval.get("leaderboard", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="4">No golden task evaluation data yet.</td></tr>
+    """
+    cline_session_markup = "\n".join(
+        [
+            f"<li>Prepared tasks: {cline_session.get('task_count', 0)}</li>",
+            f"<li>Session manifest: <code>runtime/cline-session/session-manifest.json</code></li>",
+            "<li>Use one prompt.txt per task. Do not combine multiple tasks for qwen3.</li>",
+        ]
+    )
+    target_assistant_markup = "\n".join(
+        [
+            f"<li>Entries: {target_assistant.get('entry_count', 0)}</li>",
+            f"<li>High-risk entries: {target_assistant.get('high_risk_count', 0)}</li>",
+            "<li>Build with build-target-pack or build-target-assistant against the real React target project.</li>",
         ]
     )
     return f"""<!DOCTYPE html>
@@ -600,6 +702,47 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         </article>
       </section>
 
+      <section class="grid">
+        <article class="panel">
+          <h2>Task Studio</h2>
+          <ul>
+            <li>Prepared tasks: {task_studio.get('task_count', 0)}</li>
+            <li>Runtime counts: {escape(', '.join(f"{key}={value}" for key, value in sorted((task_studio.get('counts_by_status') or {}).items())) or 'none')}</li>
+            <li>Open <code>runtime/task-studio.md</code> for the fastest task-by-task workflow.</li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h2>Cline Session Bridge</h2>
+          <ul>{cline_session_markup}</ul>
+          <ul>
+            <li>Each task has prompt.txt, fallback-prompt.txt, and response-template.json.</li>
+            <li>Use the session bundle when onboarding teammates to Cline CLI or the VSCode extension.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="panel stack">
+        <div>
+          <h2>Task Studio Queue</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Task ID</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Module</th>
+                  <th>Validate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {task_studio_rows}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section class="panel stack">
         <div>
           <h2>Task Queue</h2>
@@ -650,6 +793,53 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             <li>Use <code>review-task</code> to accept, reject, trim, or escalate a task output.</li>
             <li>Accepted reviews can be folded back into feedback learning for later runs.</li>
           </ul>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Failure Replay Lab</h2>
+          <ul>
+            <li>Replay entries: {failure_replay.get('entry_count', 0)}</li>
+            <li>Categories: {escape(', '.join(f"{key}={value}" for key, value in sorted((failure_replay.get('counts_by_category') or {}).items())) or 'none')}</li>
+            <li>Use <code>runtime/failure-replay/</code> to rerun only the failing bounded task.</li>
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Next Command</th>
+                </tr>
+              </thead>
+              <tbody>
+                {failure_replay_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Golden Task Evaluation</h2>
+          <ul>
+            {''.join(f'<li>{escape(str(item))}</li>' for item in golden_eval.get('global_recommendations', [])) or '<li>No evaluation data yet.</li>'}
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Task Type</th>
+                  <th>Success Rate</th>
+                  <th>Avg Budget</th>
+                  <th>Recommendation</th>
+                </tr>
+              </thead>
+              <tbody>
+                {golden_rows}
+              </tbody>
+            </table>
+          </div>
         </article>
       </section>
 
@@ -739,6 +929,32 @@ def build_web_report_html(output: AnalysisOutput) -> str:
               </tbody>
             </table>
           </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Code Patch Packs</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Slice</th>
+                  <th>Stack</th>
+                  <th>Kind</th>
+                  <th>Prompt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {patch_pack_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Target Integration Assistant</h2>
+          <ul>{target_assistant_markup}</ul>
         </article>
       </section>
 

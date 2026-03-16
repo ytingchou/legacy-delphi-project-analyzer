@@ -31,6 +31,11 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Weak-model prompt profiles for SQL, UI, integration, and validation tasks
 - Web workbench enhancements for task queue, runtime errors, provider health, and human review
 - VSCode Cline helper files per task pack for the fastest extension-based workflow
+- Task Studio and session-ready prompt bundles for one-task-at-a-time Cline execution
+- Bounded code patch packs for React pages and Spring Boot endpoints
+- Failure replay lab bundles for retry and debugging
+- Golden task evaluation scorecards for weak-model benchmarking
+- Target integration assistant manifests with merge checklists and route alignment scores
 - Response validators, validator-driven retry plans, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
 
 ## Usage
@@ -86,6 +91,13 @@ Build blocker task packs for Cline or later loop execution:
 legacy-delphi-analyzer build-taskpacks /path/to/artifacts --max-tasks 5
 ```
 
+Rebuild the runtime task studio and ready-made Cline session bundles:
+
+```bash
+legacy-delphi-analyzer build-task-studio /path/to/artifacts
+legacy-delphi-analyzer build-cline-session /path/to/artifacts --cline-cmd cline chat
+```
+
 Run the bundled Cline wrapper against the file-based inbox:
 
 ```bash
@@ -98,6 +110,12 @@ Regenerate the built-in Cline quick-start cheat sheets:
 
 ```bash
 legacy-delphi-analyzer build-cheatsheet /path/to/artifacts
+```
+
+Generate bounded patch packs for React and Spring Boot slices:
+
+```bash
+legacy-delphi-analyzer build-patch-packs /path/to/artifacts
 ```
 
 Validate one task response against its schema and the recovered legacy evidence:
@@ -130,6 +148,7 @@ Build a target-project integration pack against an existing React transition rep
 
 ```bash
 legacy-delphi-analyzer build-target-pack /path/to/artifacts /path/to/react-project
+legacy-delphi-analyzer build-target-assistant /path/to/artifacts /path/to/react-project
 ```
 
 Compile Oracle 19c BFF endpoint packs for Spring Boot implementation:
@@ -142,6 +161,13 @@ Build a multi-repo workspace graph:
 
 ```bash
 legacy-delphi-analyzer build-workspace-graph /path/to/artifacts
+```
+
+Regenerate failure replay bundles and golden-task scorecards:
+
+```bash
+legacy-delphi-analyzer build-failure-replay /path/to/artifacts
+legacy-delphi-analyzer evaluate-golden-tasks /path/to/artifacts
 ```
 
 Run bounded prompt-pack batches as file-based subagents:
@@ -237,8 +263,13 @@ possible per-task workflow.
 The HTML report now includes a runtime workbench view with:
 
 - task queue
+- task studio
+- cline session bridge
 - provider health
 - runtime error summary
+- failure replay lab
+- golden task evaluation
+- code patch packs
 - human review summary
 - direct bounded-workflow guidance for Cline users
 

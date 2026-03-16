@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from legacy_delphi_project_analyzer.cheatsheet import write_runtime_cheat_sheet
+from legacy_delphi_project_analyzer.cline_session import build_cline_session_manifest
+from legacy_delphi_project_analyzer.failure_replay import build_failure_replay_lab
+from legacy_delphi_project_analyzer.golden_tasks import evaluate_golden_tasks
 from legacy_delphi_project_analyzer.human_review import build_review_summary
+from legacy_delphi_project_analyzer.patch_packs import build_code_patch_packs
 from legacy_delphi_project_analyzer.phase_state import (
     ArtifactCompleteness,
     LoopMetrics,
@@ -37,6 +41,8 @@ from legacy_delphi_project_analyzer.runtime_errors import (
     load_review_summary,
     write_runtime_error_summary,
 )
+from legacy_delphi_project_analyzer.task_studio import build_task_studio
+from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, write_taskpacks
 from legacy_delphi_project_analyzer.utils import ensure_directory, write_json, write_text
 
 
@@ -233,6 +239,36 @@ def refresh_runtime_artifacts(
     output.runtime_error_summary = runtime_error_summary
     output.provider_health = provider_health
     output.review_summary = review_summary
+    taskpacks = build_taskpacks(output, run_state)
+    write_taskpacks(taskpacks, runtime_dir, include_compiled_context=True)
+    output.taskpacks = taskpacks
+    output.task_studio = build_task_studio(
+        analysis_dir=output_root,
+        runtime_dir=runtime_dir,
+        output=output,
+    )
+    output.cline_session_manifest = build_cline_session_manifest(
+        analysis_dir=output_root,
+        runtime_dir=runtime_dir,
+        output=output,
+    )
+    build_code_patch_packs(
+        analysis_dir=output_root,
+        output=output,
+    )
+    output.failure_replay_lab = build_failure_replay_lab(
+        analysis_dir=output_root,
+        runtime_dir=runtime_dir,
+        output=output,
+    )
+    output.golden_task_evaluation = evaluate_golden_tasks(
+        analysis_dir=output_root,
+        runtime_dir=runtime_dir,
+        output=output,
+    )
+    output.target_integration_assistant = _load_json(
+        output_root / "llm-pack" / "target-integration" / "target-integration-assistant-manifest.json"
+    )
     report_dir = output_root / "report"
     if report_dir.exists():
         write_text(report_dir / "index.html", build_web_report_html(output))
@@ -259,6 +295,11 @@ def compute_artifact_completeness(
         "ui_integration_artifacts": bool(output.ui_integration_artifacts),
         "prompt_packs": bool(output.prompt_packs),
         "failure_triage": bool(output.failure_triage),
+        "task_studio": (output_root / "runtime" / "task-studio.json").exists(),
+        "cline_session": (output_root / "runtime" / "cline-session" / "session-manifest.json").exists(),
+        "code_patch_packs": (output_root / "llm-pack" / "code-patch-packs" / "manifest.json").exists(),
+        "failure_replay_lab": (output_root / "runtime" / "failure-replay" / "manifest.json").exists(),
+        "golden_task_evaluation": (output_root / "runtime" / "golden-tasks" / "golden-task-evaluation.json").exists(),
         "validation_results": accepted_validations >= len(output.transition_specs) if output.transition_specs else False,
         "handoff_manifest": (output_root / HANDOFF_MANIFEST_FILE).exists(),
     }

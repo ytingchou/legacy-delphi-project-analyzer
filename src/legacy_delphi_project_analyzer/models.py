@@ -394,6 +394,42 @@ class UiIntegrationArtifact:
 
 
 @dataclass(slots=True)
+class TaskStudioTask:
+    task_id: str
+    task_type: str
+    module_name: str | None = None
+    subject_name: str | None = None
+    priority: int = 0
+    status: str = "prepared"
+    prompt_file: str | None = None
+    compiled_context_file: str | None = None
+    expected_schema_file: str | None = None
+    response_file: str | None = None
+    validation_file: str | None = None
+    retry_plan_file: str | None = None
+    copy_prompt_command: str | None = None
+    validate_command: str | None = None
+    retry_command: str | None = None
+    review_command: str | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class CodePatchPackArtifact:
+    module_name: str
+    slice_name: str
+    target_stack: str
+    patch_kind: str
+    prompt_file: str
+    summary_file: str
+    manifest_file: str
+    expected_files: list[str] = field(default_factory=list)
+    source_artifacts: list[str] = field(default_factory=list)
+    validation_checks: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ValidationRecord:
     task_id: str
     task_type: str
@@ -528,6 +564,12 @@ class AnalysisOutput:
     artifact_completeness: Any | None = None
     loop_metrics: Any | None = None
     taskpacks: list[Any] = field(default_factory=list)
+    task_studio: dict[str, Any] | None = None
+    cline_session_manifest: dict[str, Any] | None = None
+    code_patch_packs: list[CodePatchPackArtifact] = field(default_factory=list)
+    target_integration_assistant: dict[str, Any] | None = None
+    failure_replay_lab: dict[str, Any] | None = None
+    golden_task_evaluation: dict[str, Any] | None = None
     runtime_error_summary: dict[str, Any] | None = None
     provider_health: dict[str, Any] | None = None
     review_summary: dict[str, Any] | None = None

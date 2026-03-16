@@ -8,8 +8,11 @@ from pathlib import Path
 from legacy_delphi_project_analyzer.benchmarking import benchmark_prompts
 from legacy_delphi_project_analyzer.cheatsheet import write_analysis_cheat_sheet, write_runtime_cheat_sheet
 from legacy_delphi_project_analyzer.cline_bridge import run_cline_wrapper
+from legacy_delphi_project_analyzer.cline_session import build_cline_session_manifest
 from legacy_delphi_project_analyzer.console import CliReporter, render_cli_exception
+from legacy_delphi_project_analyzer.failure_replay import build_failure_replay_lab
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
+from legacy_delphi_project_analyzer.golden_tasks import evaluate_golden_tasks
 from legacy_delphi_project_analyzer.human_review import record_task_review
 from legacy_delphi_project_analyzer.llm import run_llm_artifact, validate_openai_compatible_provider
 from legacy_delphi_project_analyzer.cline import emit_cline_task
@@ -29,9 +32,11 @@ from legacy_delphi_project_analyzer.orchestrator import (
     rerun_analysis_from_runtime_state,
     run_phases,
 )
+from legacy_delphi_project_analyzer.patch_packs import build_code_patch_packs
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
 from legacy_delphi_project_analyzer.runtime_errors import save_provider_health
 from legacy_delphi_project_analyzer.subagents import run_subagent_batches
+from legacy_delphi_project_analyzer.task_studio import build_task_studio
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 from legacy_delphi_project_analyzer.target_integration import build_target_project_integration_pack
 from legacy_delphi_project_analyzer.workspace_graph import build_workspace_graph
@@ -98,6 +103,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Regenerate the Cline quick-start cheat sheets under llm-pack/ and runtime/.",
     )
     cheat_sheet_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+
+    task_studio_parser = subparsers.add_parser(
+        "build-task-studio",
+        help="Regenerate runtime task-studio artifacts and per-task quick commands.",
+    )
+    task_studio_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+
+    cline_session_parser = subparsers.add_parser(
+        "build-cline-session",
+        help="Regenerate session-ready prompt bundles for Cline CLI and the VSCode extension.",
+    )
+    cline_session_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    cline_session_parser.add_argument(
+        "--cline-cmd",
+        nargs="+",
+        default=["cline", "chat"],
+        help="Command template used when emitting run-command.txt files.",
+    )
 
     validate_response_parser = subparsers.add_parser(
         "validate-response",
@@ -332,6 +355,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate skeletons even when validation results are missing.",
     )
 
+    patch_pack_parser = subparsers.add_parser(
+        "build-patch-packs",
+        help="Generate bounded React and Spring Boot code patch packs from transition artifacts.",
+    )
+    patch_pack_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    patch_pack_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/code-patch-packs.",
+    )
+
     target_pack_parser = subparsers.add_parser(
         "build-target-pack",
         help="Compile target React project integration packs for generated UI artifacts.",
@@ -339,6 +373,18 @@ def build_parser() -> argparse.ArgumentParser:
     target_pack_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
     target_pack_parser.add_argument("target_project_dir", help="Path to the target React project root.")
     target_pack_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/target-integration.",
+    )
+
+    target_assistant_parser = subparsers.add_parser(
+        "build-target-assistant",
+        help="Alias for build-target-pack with target-integration assistant outputs emphasized.",
+    )
+    target_assistant_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    target_assistant_parser.add_argument("target_project_dir", help="Path to the target React project root.")
+    target_assistant_parser.add_argument(
         "--output-dir",
         default=None,
         help="Optional output directory. Defaults to <analysis_dir>/llm-pack/target-integration.",
@@ -365,6 +411,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output directory. Defaults to <analysis_dir>/llm-pack/workspace-graph.",
     )
+
+    failure_replay_parser = subparsers.add_parser(
+        "build-failure-replay",
+        help="Regenerate failure replay lab bundles from runtime validation and error history.",
+    )
+    failure_replay_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+
+    golden_tasks_parser = subparsers.add_parser(
+        "evaluate-golden-tasks",
+        help="Evaluate bounded task types and generate weak-model golden-task scorecards.",
+    )
+    golden_tasks_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
 
     subagents_parser = subparsers.add_parser(
         "run-subagents",
@@ -422,6 +480,8 @@ def build_parser() -> argparse.ArgumentParser:
         phase_status_parser,
         build_taskpacks_parser,
         cheat_sheet_parser,
+        task_studio_parser,
+        cline_session_parser,
         validate_response_parser,
         retry_plan_parser,
         loop_parser,
@@ -436,9 +496,13 @@ def build_parser() -> argparse.ArgumentParser:
         provider_probe_parser,
         review_parser,
         codegen_parser,
+        patch_pack_parser,
         target_pack_parser,
+        target_assistant_parser,
         bff_compiler_parser,
         workspace_graph_parser,
+        failure_replay_parser,
+        golden_tasks_parser,
         subagents_parser,
         delivery_parser,
     ):
@@ -792,6 +856,53 @@ def _run_command(args, reporter: CliReporter) -> int:
         reporter.info(f"LLM cheat sheet: {analysis_paths['markdown_path']}")
         reporter.info(f"Runtime cheat sheet: {runtime_paths['markdown_path']}")
         return 0
+    if args.command == "build-task-studio":
+        reporter.progress("Regenerating task studio")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is None:
+            raise ValueError(f"Runtime state does not exist under {analysis_dir / 'runtime'}")
+        refresh_runtime_artifacts(
+            output,
+            target_model_profile=run_state.target_model_profile,
+            dispatch_mode=run_state.dispatch_mode,
+            analysis_config=run_state.analysis_config,
+            provider_config=run_state.provider_config,
+        )
+        studio = build_task_studio(
+            analysis_dir=analysis_dir,
+            runtime_dir=analysis_dir / "runtime",
+            output=output,
+        )
+        reporter.info(f"Task studio generated: {studio['task_count']} tasks")
+        reporter.info(f"Task studio file: {analysis_dir / 'runtime' / 'task-studio.json'}")
+        return 0
+    if args.command == "build-cline-session":
+        reporter.progress("Regenerating Cline session prompt bundles")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is None:
+            raise ValueError(f"Runtime state does not exist under {analysis_dir / 'runtime'}")
+        refresh_runtime_artifacts(
+            output,
+            target_model_profile=run_state.target_model_profile,
+            dispatch_mode=run_state.dispatch_mode,
+            analysis_config=run_state.analysis_config,
+            provider_config=run_state.provider_config,
+        )
+        manifest = build_cline_session_manifest(
+            analysis_dir=analysis_dir,
+            runtime_dir=analysis_dir / "runtime",
+            output=output,
+            cline_cmd=args.cline_cmd,
+        )
+        reporter.info(f"Cline session bundles: {manifest['task_count']}")
+        reporter.info(f"Session manifest: {analysis_dir / 'runtime' / 'cline-session' / 'session-manifest.json'}")
+        return 0
     if args.command == "generate-code":
         reporter.progress("Generating React and Spring Boot skeletons")
         generated = generate_transition_code(
@@ -803,7 +914,29 @@ def _run_command(args, reporter: CliReporter) -> int:
         reporter.info(f"Generated code skeletons: {len(generated)}")
         reporter.info(f"Output directory: {base_dir}")
         return 0
-    if args.command == "build-target-pack":
+    if args.command == "build-patch-packs":
+        reporter.progress("Generating bounded code patch packs")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is not None:
+            refresh_runtime_artifacts(
+                output,
+                target_model_profile=run_state.target_model_profile,
+                dispatch_mode=run_state.dispatch_mode,
+                analysis_config=run_state.analysis_config,
+                provider_config=run_state.provider_config,
+            )
+        manifest = build_code_patch_packs(
+            analysis_dir=analysis_dir,
+            output=output,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        reporter.info(f"Patch packs generated: {manifest['patch_count']}")
+        reporter.info(f"Patch pack manifest: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'code-patch-packs') / 'manifest.json'}")
+        return 0
+    if args.command in {"build-target-pack", "build-target-assistant"}:
         reporter.progress("Inspecting target React project and building integration pack")
         manifest = build_target_project_integration_pack(
             Path(args.analysis_dir),
@@ -814,6 +947,8 @@ def _run_command(args, reporter: CliReporter) -> int:
             f"Target integration pack complete: {len(manifest['entries'])} entries, "
             f"target={manifest['target_project_dir']}"
         )
+        output_dir = Path(args.output_dir).resolve() if args.output_dir else (Path(args.analysis_dir).resolve() / "llm-pack" / "target-integration")
+        reporter.info(f"Assistant manifest: {output_dir / 'target-integration-assistant-manifest.json'}")
         return 0
     if args.command == "compile-bff-sql":
         reporter.progress("Compiling Oracle 19c BFF SQL endpoint packs")
@@ -838,6 +973,50 @@ def _run_command(args, reporter: CliReporter) -> int:
             f"nodes={graph['summary']['node_count']}, "
             f"cross_root_edges={graph['summary']['cross_root_edges']}"
         )
+        return 0
+    if args.command == "build-failure-replay":
+        reporter.progress("Rebuilding failure replay lab")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is not None:
+            refresh_runtime_artifacts(
+                output,
+                target_model_profile=run_state.target_model_profile,
+                dispatch_mode=run_state.dispatch_mode,
+                analysis_config=run_state.analysis_config,
+                provider_config=run_state.provider_config,
+            )
+        manifest = build_failure_replay_lab(
+            analysis_dir=analysis_dir,
+            runtime_dir=analysis_dir / "runtime",
+            output=output,
+        )
+        reporter.info(f"Failure replay entries: {manifest['entry_count']}")
+        reporter.info(f"Failure replay manifest: {analysis_dir / 'runtime' / 'failure-replay' / 'manifest.json'}")
+        return 0
+    if args.command == "evaluate-golden-tasks":
+        reporter.progress("Evaluating weak-model golden tasks")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        bundle = load_runtime_bundle(analysis_dir)
+        run_state = bundle["run_state"]
+        if run_state is not None:
+            refresh_runtime_artifacts(
+                output,
+                target_model_profile=run_state.target_model_profile,
+                dispatch_mode=run_state.dispatch_mode,
+                analysis_config=run_state.analysis_config,
+                provider_config=run_state.provider_config,
+            )
+        report = evaluate_golden_tasks(
+            analysis_dir=analysis_dir,
+            runtime_dir=analysis_dir / "runtime",
+            output=output,
+        )
+        reporter.info(f"Golden task types evaluated: {report['task_type_count']}")
+        reporter.info(f"Golden task report: {analysis_dir / 'runtime' / 'golden-tasks' / 'golden-task-evaluation.json'}")
         return 0
     if args.command == "run-subagents":
         reporter.progress("Planning and dispatching bounded subagent batches")
@@ -910,7 +1089,7 @@ def _run_command(args, reporter: CliReporter) -> int:
         )
         assert output.runtime_state is not None
         taskpacks = build_taskpacks(output, output.runtime_state, max_tasks=args.max_tasks)
-        written = write_taskpacks(taskpacks, analysis_dir / "runtime")
+        written = write_taskpacks(taskpacks, analysis_dir / "runtime", include_compiled_context=True)
         reporter.info(f"Task packs generated: {len(written)}")
         for path in written[:10]:
             reporter.info(f"- {path}")

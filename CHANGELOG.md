@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.5.0
+
+- Added `Task Studio` runtime artifacts, per-task quick commands, and report visibility so teams can work one bounded Cline task at a time.
+- Added `Cline Session` bundles with ready-made `prompt.txt`, fallback/verification prompt files, and response templates for Cline CLI and the VSCode extension.
+- Added bounded React and Spring Boot `code patch packs` so weak internal models can produce patch-oriented output instead of broad redesign prose.
+- Upgraded target-project integration packs with an assistant manifest, route-alignment scoring, merge checklists, and bounded integration prompts.
+- Added a `failure replay lab` with replay bundles, repair strategies, and next-command guidance for repeatedly failing tasks.
+- Added `golden task evaluation` scorecards to measure weak-model task success rates, context budgets, and recommended bounded task shapes.
+- Expanded the web workbench to include task studio, cline session bridge, failure replay, golden task evaluation, code patch packs, and target-integration assistant visibility.
+- Added CLI commands for `build-task-studio`, `build-cline-session`, `build-patch-packs`, `build-target-assistant`, `build-failure-replay`, and `evaluate-golden-tasks`.
+- Added regression coverage for the new runtime/workbench outputs and target assistant artifacts.
+
 ## v3.7.0
 
 - Added a bundled Cline bridge runner with watch/once/resume modes, output sanitizing, JSON repair, auto-validation, and retry-plan follow-up.

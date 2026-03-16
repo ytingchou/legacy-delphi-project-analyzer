@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from legacy_delphi_project_analyzer.context_compiler import compile_task_context
 from legacy_delphi_project_analyzer.model_profiles import ModelProfile, get_model_profile, get_task_specific_profile
 from legacy_delphi_project_analyzer.phase_state import BlockingUnknown, RunState
 from legacy_delphi_project_analyzer.utils import ensure_directory, estimate_tokens, read_text_file, slugify, write_json, write_text
@@ -172,6 +173,13 @@ def write_taskpacks(
                 "recommended_next_task": "",
             },
         )
+        if include_compiled_context:
+            compile_task_context(
+                analysis_dir=runtime_dir.parent,
+                runtime_dir=runtime_dir,
+                taskpack=taskpack,
+                task_dir=task_dir,
+            )
         index_payload.append(
             {
                 "task_id": taskpack.task_id,

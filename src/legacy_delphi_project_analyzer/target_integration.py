@@ -30,15 +30,19 @@ def build_target_project_integration_pack(
         write_text(pack_dir / f"{base_name}.md", _render_entry_markdown(entry))
         entries.append(entry)
 
+    assistant_manifest = _build_assistant_manifest(entries, target_summary)
     manifest = {
         "analysis_dir": analysis_dir.as_posix(),
         "target_project_dir": target_project_dir.as_posix(),
         "target_summary": target_summary,
         "entries": entries,
+        "assistant_manifest_file": (pack_dir / "target-integration-assistant-manifest.json").as_posix(),
     }
     write_json(pack_dir / "target-project-summary.json", target_summary)
     write_json(pack_dir / "target-integration-manifest.json", manifest)
+    write_json(pack_dir / "target-integration-assistant-manifest.json", assistant_manifest)
     write_text(pack_dir / "target-integration-guide.md", _render_manifest_markdown(manifest))
+    write_text(pack_dir / "target-integration-assistant-guide.md", _render_assistant_markdown(assistant_manifest))
     return manifest
 
 
@@ -100,6 +104,22 @@ def _build_entry(artifact: Any, target_summary: dict[str, Any]) -> dict[str, Any
         merge_risks.append("Route already exists in target project; verify whether the legacy transition should extend it or replace it.")
     if not api_files:
         merge_risks.append("No API client file was detected; generate a new API adapter for this page.")
+    route_alignment_score = 100
+    if not route_exists:
+        route_alignment_score -= 25
+    if not feature_exists:
+        route_alignment_score -= 15
+    if not api_files:
+        route_alignment_score -= 20
+    merge_checklist = [
+        "Confirm the route file before editing the target project.",
+        "Keep the integration scoped to one page only.",
+        "Update or create one API adapter only.",
+    ]
+    if route_exists:
+        merge_checklist.append("Check whether the existing route should be extended instead of replaced.")
+    if feature_exists:
+        merge_checklist.append("Merge into the existing feature directory without overwriting local conventions.")
     return {
         "module_name": artifact.module_name,
         "page_name": artifact.page_name,
@@ -117,6 +137,13 @@ def _build_entry(artifact: Any, target_summary: dict[str, Any]) -> dict[str, Any
         "acceptance_checks": list(artifact.acceptance_checks),
         "handoff_artifacts": list(artifact.handoff_artifacts),
         "merge_risks": merge_risks,
+        "route_alignment_score": max(route_alignment_score, 0),
+        "suggested_api_adapter": api_files[0] if api_files else f"{artifact.target_feature_dir}/{artifact.page_name}Api.ts",
+        "merge_checklist": merge_checklist,
+        "assistant_prompt": (
+            f"Integrate only page {artifact.page_name} into the target project. "
+            "Use the listed files_to_update/files_to_create and do not redesign unrelated routes."
+        ),
     }
 
 
@@ -178,6 +205,53 @@ def _render_manifest_markdown(manifest: dict[str, Any]) -> str:
                 f"- Feature dir: `{entry['target_feature_dir']}`",
                 f"- Route registration: {entry['route_registration']}",
                 f"- Files to update: {', '.join(entry['files_to_update']) or 'None'}",
+                "",
+            ]
+        )
+    return "\n".join(lines).strip() + "\n"
+
+
+def _build_assistant_manifest(entries: list[dict[str, Any]], target_summary: dict[str, Any]) -> dict[str, Any]:
+    high_risk = [
+        item for item in entries
+        if len(item.get("merge_risks", [])) >= 2 or int(item.get("route_alignment_score") or 0) < 70
+    ]
+    return {
+        "entry_count": len(entries),
+        "target_feature_count": len(target_summary.get("feature_dirs", [])),
+        "route_file_count": len(target_summary.get("route_files", [])),
+        "high_risk_count": len(high_risk),
+        "recommended_workflow": [
+            "Select one page only.",
+            "Open files_to_update first, then files_to_create.",
+            "Use assistant_prompt as the Cline entry point.",
+            "Validate the integration result before moving to the next page.",
+        ],
+        "entries": entries,
+    }
+
+
+def _render_assistant_markdown(manifest: dict[str, Any]) -> str:
+    lines = [
+        "# Target Integration Assistant",
+        "",
+        f"- Entries: {manifest.get('entry_count', 0)}",
+        f"- Existing target features: {manifest.get('target_feature_count', 0)}",
+        f"- High-risk entries: {manifest.get('high_risk_count', 0)}",
+        "",
+        "## Recommended Workflow",
+        "",
+    ]
+    for item in manifest.get("recommended_workflow", []):
+        lines.append(f"- {item}")
+    lines.extend(["", "## Entries", ""])
+    for entry in manifest.get("entries", []):
+        lines.extend(
+            [
+                f"### {entry['module_name']} / {entry['page_name']}",
+                f"- Route alignment score: {entry.get('route_alignment_score', 0)}",
+                f"- Suggested API adapter: {entry.get('suggested_api_adapter')}",
+                f"- Assistant prompt: {entry.get('assistant_prompt')}",
                 "",
             ]
         )
