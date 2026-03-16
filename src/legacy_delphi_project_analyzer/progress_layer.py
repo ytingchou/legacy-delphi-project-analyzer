@@ -27,6 +27,12 @@ def update_progress_report(
         "readiness_blocked": len([item for item in output.transition_specs if item.readiness_level == "blocked"]),
         "blocker_count": len(output.blocking_unknowns or []),
         "runtime_error_count": int((output.runtime_error_summary or {}).get("item_count", 0)),
+        "patch_apply_count": int((output.patch_apply_manifest or {}).get("entry_count", 0)),
+        "repo_validation_problem_count": sum(
+            int(value)
+            for key, value in ((output.repo_validation_report or {}).get("counts_by_status") or {}).items()
+            if key != "pass"
+        ),
         "accepted_validations": len(
             [
                 item for item in _load_json(runtime_dir / "validation-results.json") or []
@@ -71,6 +77,8 @@ def _management_notes(history: list[dict[str, Any]]) -> list[str]:
         f"Ready modules: {latest.get('readiness_ready', 0)}",
         f"Blocked modules: {latest.get('readiness_blocked', 0)}",
         f"Current blocker count: {latest.get('blocker_count', 0)}",
+        f"Patch-apply slices: {latest.get('patch_apply_count', 0)}",
+        f"Repo validation problems: {latest.get('repo_validation_problem_count', 0)}",
     ]
     if len(history) >= 2:
         notes.append(f"Blocker trend since last snapshot: {_trend_summary(history).get('blockers')}")

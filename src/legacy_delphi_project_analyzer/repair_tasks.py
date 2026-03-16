@@ -13,6 +13,7 @@ def build_repair_tasks(
     runtime_dir: Path,
     runtime_error_summary: dict[str, Any] | None,
     patch_validation_report: dict[str, Any] | None = None,
+    repo_validation_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     repair_dir = runtime_dir / "repair-tasks"
     ensure_directory(repair_dir)
@@ -54,6 +55,24 @@ def build_repair_tasks(
                 "Fix only the listed validation issues and do not redesign the slice."
             ),
             "next_command": "",
+            "notes": list(item.get("issues", [])),
+        }
+        entries.append(entry)
+
+    for item in (repo_validation_report or {}).get("entries", []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "pass") == "pass":
+            continue
+        slice_name = str(item.get("slice_name") or "slice")
+        entry = {
+            "repair_id": f"repair-repo-{slice_name}",
+            "source": "repo_validation",
+            "task_id": None,
+            "category": "repo_validation",
+            "title": f"Repair repo placement for {slice_name}",
+            "repair_prompt": str(item.get("repair_prompt") or ""),
+            "next_command": item.get("next_command") or "",
             "notes": list(item.get("issues", [])),
         }
         entries.append(entry)

@@ -43,6 +43,9 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Developer handoff packs with implementation briefs and patch checklists
 - Multi-repo transition maps for reusable roots and shared SQL families
 - Controlled delivery pipelines that chain sync, validation, repair, handoff, and final slice packaging
+- Patch-apply assistant bundles with allowed-file scopes and apply-order guides
+- Repo validation gates for target repo placement, route, and package checks
+- Task Studio 2.0 with budget hints, response-template references, and richer web workbench guidance
 - Response validators, validator-driven retry plans, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
 
 ## Usage
@@ -125,6 +128,7 @@ Generate bounded patch packs for React and Spring Boot slices:
 
 ```bash
 legacy-delphi-analyzer build-patch-packs /path/to/artifacts
+legacy-delphi-analyzer build-patch-apply /path/to/artifacts --target-project-dir /path/to/target-project
 ```
 
 Validate one task response against its schema and the recovered legacy evidence:
@@ -184,6 +188,7 @@ Sync bounded patch packs with a target transition workspace, validate them, and 
 ```bash
 legacy-delphi-analyzer build-workspace-sync /path/to/artifacts /path/to/target-project
 legacy-delphi-analyzer validate-patch-packs /path/to/artifacts --target-project-dir /path/to/target-project
+legacy-delphi-analyzer build-repo-validation /path/to/artifacts --target-project-dir /path/to/target-project
 legacy-delphi-analyzer build-repair-tasks /path/to/artifacts
 legacy-delphi-analyzer build-progress-report /path/to/artifacts
 legacy-delphi-analyzer build-handoff-packs /path/to/artifacts
@@ -292,12 +297,15 @@ The HTML report now includes a runtime workbench view with:
 
 - task queue
 - task studio
+- task studio 2.0
 - cline session bridge
 - provider health
 - runtime error summary
 - failure replay lab
 - golden task evaluation
 - code patch packs
+- patch apply assistant
+- repo validation gate
 - workspace sync
 - patch validation
 - repair tasks

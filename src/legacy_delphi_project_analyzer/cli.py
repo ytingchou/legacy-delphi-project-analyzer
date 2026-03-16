@@ -18,6 +18,7 @@ from legacy_delphi_project_analyzer.golden_tasks import evaluate_golden_tasks
 from legacy_delphi_project_analyzer.human_review import record_task_review
 from legacy_delphi_project_analyzer.llm import run_llm_artifact, validate_openai_compatible_provider
 from legacy_delphi_project_analyzer.multi_repo_map import build_multi_repo_transition_map
+from legacy_delphi_project_analyzer.patch_apply import build_patch_apply_assistant
 from legacy_delphi_project_analyzer.patch_validation import validate_patch_packs
 from legacy_delphi_project_analyzer.cline import emit_cline_task
 from legacy_delphi_project_analyzer.delivery import deliver_slices
@@ -39,6 +40,7 @@ from legacy_delphi_project_analyzer.orchestrator import (
 from legacy_delphi_project_analyzer.patch_packs import build_code_patch_packs
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
 from legacy_delphi_project_analyzer.progress_layer import update_progress_report
+from legacy_delphi_project_analyzer.repo_validation import build_repo_validation_gate
 from legacy_delphi_project_analyzer.runtime_errors import save_provider_health
 from legacy_delphi_project_analyzer.repair_tasks import build_repair_tasks
 from legacy_delphi_project_analyzer.subagents import run_subagent_batches
@@ -373,6 +375,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional output directory. Defaults to <analysis_dir>/llm-pack/code-patch-packs.",
     )
 
+    patch_apply_parser = subparsers.add_parser(
+        "build-patch-apply",
+        help="Generate bounded patch-apply bundles that constrain file edits for one React page or Spring endpoint slice.",
+    )
+    patch_apply_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    patch_apply_parser.add_argument(
+        "--target-project-dir",
+        default=None,
+        help="Optional target transition workspace root for merge-aware apply guidance.",
+    )
+    patch_apply_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/patch-apply-assistant.",
+    )
+
     target_pack_parser = subparsers.add_parser(
         "build-target-pack",
         help="Compile target React project integration packs for generated UI artifacts.",
@@ -457,6 +475,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=None,
         help="Optional output directory. Defaults to <analysis_dir>/llm-pack/patch-validation.",
+    )
+
+    repo_validation_parser = subparsers.add_parser(
+        "build-repo-validation",
+        help="Validate bounded patch slices against a target repo layout before asking Cline to apply them.",
+    )
+    repo_validation_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    repo_validation_parser.add_argument(
+        "--target-project-dir",
+        default=None,
+        help="Optional target project root for repo-aware validation.",
+    )
+    repo_validation_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/repo-validation-gate.",
     )
 
     repair_tasks_parser = subparsers.add_parser(
@@ -587,6 +621,7 @@ def build_parser() -> argparse.ArgumentParser:
         review_parser,
         codegen_parser,
         patch_pack_parser,
+        patch_apply_parser,
         target_pack_parser,
         target_assistant_parser,
         bff_compiler_parser,
@@ -595,6 +630,7 @@ def build_parser() -> argparse.ArgumentParser:
         golden_tasks_parser,
         workspace_sync_parser,
         patch_validation_parser,
+        repo_validation_parser,
         repair_tasks_parser,
         progress_parser,
         handoff_parser,
@@ -1033,6 +1069,21 @@ def _run_command(args, reporter: CliReporter) -> int:
         reporter.info(f"Patch packs generated: {manifest['patch_count']}")
         reporter.info(f"Patch pack manifest: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'code-patch-packs') / 'manifest.json'}")
         return 0
+    if args.command == "build-patch-apply":
+        reporter.progress("Generating bounded patch-apply assistant bundles")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        manifest = build_patch_apply_assistant(
+            analysis_dir,
+            output=output,
+            target_project_dir=Path(args.target_project_dir) if args.target_project_dir else None,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        reporter.info(f"Patch-apply entries: {manifest['entry_count']}")
+        reporter.info(
+            f"Patch-apply manifest: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'patch-apply-assistant') / 'manifest.json'}"
+        )
+        return 0
     if args.command in {"build-target-pack", "build-target-assistant"}:
         reporter.progress("Inspecting target React project and building integration pack")
         manifest = build_target_project_integration_pack(
@@ -1141,21 +1192,42 @@ def _run_command(args, reporter: CliReporter) -> int:
         reporter.info(f"Patch validation entries: {manifest['entry_count']}")
         reporter.info(f"Patch validation report: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'patch-validation') / 'patch-validation.json'}")
         return 0
+    if args.command == "build-repo-validation":
+        reporter.progress("Validating bounded patch slices against the target repo layout")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        manifest = build_repo_validation_gate(
+            analysis_dir,
+            output=output,
+            target_project_dir=Path(args.target_project_dir) if args.target_project_dir else None,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        reporter.info(f"Repo validation entries: {manifest['entry_count']}")
+        reporter.info(
+            f"Repo validation report: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'repo-validation-gate') / 'repo-validation.json'}"
+        )
+        return 0
     if args.command == "build-repair-tasks":
         reporter.progress("Building interactive repair tasks")
         analysis_dir = Path(args.analysis_dir).resolve()
         output = rerun_analysis_from_runtime_state(analysis_dir)
         runtime_dir = analysis_dir / "runtime"
         patch_validation_report = None
+        repo_validation_report = None
         patch_validation_path = analysis_dir / "llm-pack" / "patch-validation" / "patch-validation.json"
         if patch_validation_path.exists():
             import json
             patch_validation_report = json.loads(patch_validation_path.read_text(encoding="utf-8"))
+        repo_validation_path = analysis_dir / "llm-pack" / "repo-validation-gate" / "repo-validation.json"
+        if repo_validation_path.exists():
+            import json
+            repo_validation_report = json.loads(repo_validation_path.read_text(encoding="utf-8"))
         manifest = build_repair_tasks(
             analysis_dir,
             runtime_dir=runtime_dir,
             runtime_error_summary=output.runtime_error_summary,
             patch_validation_report=patch_validation_report,
+            repo_validation_report=repo_validation_report,
         )
         reporter.info(f"Repair tasks: {manifest['entry_count']}")
         reporter.info(f"Repair task manifest: {runtime_dir / 'repair-tasks' / 'repair-tasks.json'}")

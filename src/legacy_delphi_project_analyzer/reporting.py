@@ -182,6 +182,8 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         "golden_task_evaluation": output.golden_task_evaluation,
         "workspace_sync_report": output.workspace_sync_report,
         "patch_validation_report": output.patch_validation_report,
+        "patch_apply_manifest": output.patch_apply_manifest,
+        "repo_validation_report": output.repo_validation_report,
         "repair_task_manifest": output.repair_task_manifest,
         "progress_report": output.progress_report,
         "developer_handoff_manifest": output.developer_handoff_manifest,
@@ -256,6 +258,16 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             "Patch Validation",
             str((output.patch_validation_report or {}).get("entry_count", 0)),
             "Patch-gate entries",
+        ),
+        (
+            "Patch Apply",
+            str((output.patch_apply_manifest or {}).get("entry_count", 0)),
+            "Allowed-file bundles",
+        ),
+        (
+            "Repo Validation",
+            str((output.repo_validation_report or {}).get("entry_count", 0)),
+            "Target repo gate",
         ),
         (
             "Repair Tasks",
@@ -355,6 +367,8 @@ def build_web_report_html(output: AnalysisOutput) -> str:
     target_assistant = output.target_integration_assistant or {"entry_count": 0, "high_risk_count": 0, "entries": []}
     workspace_sync = output.workspace_sync_report or {"entry_count": 0, "counts_by_state": {}, "entries": []}
     patch_validation = output.patch_validation_report or {"entry_count": 0, "counts_by_status": {}, "entries": []}
+    patch_apply = output.patch_apply_manifest or {"entry_count": 0, "counts_by_stack": {}, "entries": []}
+    repo_validation = output.repo_validation_report or {"entry_count": 0, "counts_by_status": {}, "entries": []}
     repair_tasks = output.repair_task_manifest or {"entry_count": 0, "entries": []}
     progress_report = output.progress_report or {"snapshot_count": 0, "latest": {}, "management_notes": []}
     developer_handoff = output.developer_handoff_manifest or {"entry_count": 0, "entries": []}
@@ -442,14 +456,34 @@ def build_web_report_html(output: AnalysisOutput) -> str:
           <td>{escape(item.get('task_id') or 'unknown')}</td>
           <td>{escape(item.get('task_type') or 'unknown')}</td>
           <td>{escape(item.get('status') or 'prepared')}</td>
+          <td>{escape(str(item.get('context_budget_tokens') or 0))}</td>
+          <td>{escape(str(item.get('context_size_hint') or 'small'))}</td>
           <td>{escape(item.get('module_name') or 'None')}</td>
+          <td>{escape(item.get('validation_status') or 'None')}</td>
           <td><code>{escape(item.get('validate_command') or '')}</code></td>
         </tr>
         """
         for item in task_studio.get("tasks", [])[:10]
         if isinstance(item, dict)
     ) or """
-        <tr><td colspan="5">No task studio entries generated yet.</td></tr>
+        <tr><td colspan="8">No task studio entries generated yet.</td></tr>
+    """
+    task_studio_detail_cards = "\n".join(
+        f"""
+        <article class="bundle-card">
+          <h3>{escape(str(item.get('task_id') or 'unknown'))}</h3>
+          <p><strong>Type:</strong> {escape(str(item.get('task_type') or 'unknown'))}</p>
+          <p><strong>Budget:</strong> {escape(str(item.get('context_budget_tokens') or 0))} tokens ({escape(str(item.get('context_size_hint') or 'small'))})</p>
+          <p><strong>Prompt:</strong> <code>{escape(str(item.get('prompt_file') or ''))}</code></p>
+          <p><strong>Response Template:</strong> <code>{escape(str(item.get('response_template_file') or ''))}</code></p>
+          <p><strong>Retry Plan:</strong> <code>{escape(str(item.get('retry_plan_file') or ''))}</code></p>
+          <p><strong>Copy Prompt:</strong> <code>{escape(str(item.get('copy_prompt_command') or ''))}</code></p>
+        </article>
+        """
+        for item in task_studio.get("tasks", [])[:6]
+        if isinstance(item, dict)
+    ) or """
+        <article class="bundle-card"><h3>No task details</h3><p>Run build-task-studio after task packs are generated.</p></article>
     """
     patch_pack_rows = "\n".join(
         f"""
@@ -535,6 +569,36 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         if isinstance(item, dict)
     ) or """
         <tr><td colspan="4">No patch validation report generated yet.</td></tr>
+    """
+    patch_apply_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('module_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('slice_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('target_stack') or 'unknown'))}</td>
+          <td>{len(item.get('allowed_files', []))}</td>
+          <td><code>{escape(str(item.get('patch_apply_prompt_file') or ''))}</code></td>
+        </tr>
+        """
+        for item in patch_apply.get("entries", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="5">No patch-apply assistant bundles generated yet.</td></tr>
+    """
+    repo_validation_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('module_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('slice_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('status') or 'unknown'))}</td>
+          <td>{escape(', '.join(item.get('issues', [])) or 'None')}</td>
+          <td><code>{escape(str(item.get('patch_apply_prompt_file') or ''))}</code></td>
+        </tr>
+        """
+        for item in repo_validation.get("entries", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="5">No repo validation gate report generated yet.</td></tr>
     """
     repair_rows = "\n".join(
         f"""
@@ -833,6 +897,7 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             <li>Prepared tasks: {task_studio.get('task_count', 0)}</li>
             <li>Runtime counts: {escape(', '.join(f"{key}={value}" for key, value in sorted((task_studio.get('counts_by_status') or {}).items())) or 'none')}</li>
             <li>Open <code>runtime/task-studio.md</code> for the fastest task-by-task workflow.</li>
+            <li>Use <code>runtime/task-studio/workflow.md</code> for the copy/paste/validate loop.</li>
           </ul>
         </article>
         <article class="panel">
@@ -855,7 +920,10 @@ def build_web_report_html(output: AnalysisOutput) -> str:
                   <th>Task ID</th>
                   <th>Type</th>
                   <th>Status</th>
+                  <th>Budget</th>
+                  <th>Size</th>
                   <th>Module</th>
+                  <th>Validation</th>
                   <th>Validate</th>
                 </tr>
               </thead>
@@ -863,6 +931,21 @@ def build_web_report_html(output: AnalysisOutput) -> str:
                 {task_studio_rows}
               </tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel stack">
+        <div>
+          <h2>Task Studio 2.0</h2>
+          <ul>
+            <li>Copy one prompt only.</li>
+            <li>Save the response into <code>agent-response.json</code> or the Cline outbox response.</li>
+            <li>Run <code>validate-response</code> immediately after each response.</li>
+            <li>If validation fails, use <code>retry-plan</code> before broadening the task.</li>
+          </ul>
+          <div class="bundle-grid">
+            {task_studio_detail_cards}
           </div>
         </div>
       </section>
@@ -1009,6 +1092,56 @@ def build_web_report_html(output: AnalysisOutput) -> str:
               </thead>
               <tbody>
                 {patch_validation_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Patch Apply Assistant</h2>
+          <ul>
+            <li>Entries: {patch_apply.get('entry_count', 0)}</li>
+            <li>Use these bundles to constrain Cline to one page or one endpoint and only the allowed files.</li>
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Slice</th>
+                  <th>Stack</th>
+                  <th>Allowed Files</th>
+                  <th>Prompt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {patch_apply_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Repo Validation Gate</h2>
+          <ul>
+            <li>Entries: {repo_validation.get('entry_count', 0)}</li>
+            <li>Statuses: {escape(', '.join(f"{key}={value}" for key, value in sorted((repo_validation.get('counts_by_status') or {}).items())) or 'none')}</li>
+            <li>Run this after patch apply to catch placement, route, and package issues before the next slice.</li>
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Slice</th>
+                  <th>Status</th>
+                  <th>Issues</th>
+                  <th>Patch Apply</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repo_validation_rows}
               </tbody>
             </table>
           </div>

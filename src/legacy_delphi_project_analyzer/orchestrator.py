@@ -12,8 +12,10 @@ from legacy_delphi_project_analyzer.failure_replay import build_failure_replay_l
 from legacy_delphi_project_analyzer.golden_tasks import evaluate_golden_tasks
 from legacy_delphi_project_analyzer.human_review import build_review_summary
 from legacy_delphi_project_analyzer.multi_repo_map import build_multi_repo_transition_map
+from legacy_delphi_project_analyzer.patch_apply import build_patch_apply_assistant
 from legacy_delphi_project_analyzer.patch_packs import build_code_patch_packs
 from legacy_delphi_project_analyzer.progress_layer import update_progress_report
+from legacy_delphi_project_analyzer.repo_validation import build_repo_validation_gate
 from legacy_delphi_project_analyzer.phase_state import (
     ArtifactCompleteness,
     LoopMetrics,
@@ -260,6 +262,14 @@ def refresh_runtime_artifacts(
         analysis_dir=output_root,
         output=output,
     )
+    output.patch_apply_manifest = build_patch_apply_assistant(
+        output_root,
+        output=output,
+    )
+    output.repo_validation_report = build_repo_validation_gate(
+        output_root,
+        output=output,
+    )
     output.failure_replay_lab = build_failure_replay_lab(
         analysis_dir=output_root,
         runtime_dir=runtime_dir,
@@ -285,11 +295,16 @@ def refresh_runtime_artifacts(
     )
     output.workspace_sync_report = _load_json(output_root / "llm-pack" / "workspace-sync" / "workspace-sync.json")
     output.patch_validation_report = _load_json(output_root / "llm-pack" / "patch-validation" / "patch-validation.json")
+    if output.patch_apply_manifest is None:
+        output.patch_apply_manifest = _load_json(output_root / "llm-pack" / "patch-apply-assistant" / "manifest.json")
+    if output.repo_validation_report is None:
+        output.repo_validation_report = _load_json(output_root / "llm-pack" / "repo-validation-gate" / "repo-validation.json")
     output.repair_task_manifest = build_repair_tasks(
         output_root,
         runtime_dir=runtime_dir,
         runtime_error_summary=runtime_error_summary,
         patch_validation_report=output.patch_validation_report,
+        repo_validation_report=output.repo_validation_report,
     )
     output.target_integration_assistant = _load_json(
         output_root / "llm-pack" / "target-integration" / "target-integration-assistant-manifest.json"

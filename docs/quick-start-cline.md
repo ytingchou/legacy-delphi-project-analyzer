@@ -28,6 +28,7 @@ legacy-delphi-analyzer build-task-studio /path/to/artifacts
 legacy-delphi-analyzer build-cline-session /path/to/artifacts
 legacy-delphi-analyzer build-cheatsheet /path/to/artifacts
 legacy-delphi-analyzer build-patch-packs /path/to/artifacts
+legacy-delphi-analyzer build-patch-apply /path/to/artifacts
 legacy-delphi-analyzer evaluate-golden-tasks /path/to/artifacts
 legacy-delphi-analyzer run-cline-wrapper /path/to/artifacts --cline-cmd cline chat --watch
 ```
@@ -55,6 +56,7 @@ Use:
 - `llm-pack/cline-cheat-sheet.md` for the overall workflow and prompt rules
 - `runtime/cline-cheat-sheet.md` for the current top blocker tasks and exact commands
 - `runtime/task-studio.md` for task status and exact validate/retry commands
+- `runtime/task-studio/workflow.md` for the shortest copy/paste/validate loop
 - `runtime/cline-session/quick-start.md` for prebuilt `prompt.txt` session bundles
 - `runtime/progress/progress-report.md` for current readiness and blocker trends
 - `delivery-handoff/README.md` for engineer-facing handoff entry points
@@ -241,6 +243,8 @@ When the task is moving into the real transition workspace, also run:
 ```bash
 legacy-delphi-analyzer build-workspace-sync /path/to/artifacts /path/to/target-react-project
 legacy-delphi-analyzer validate-patch-packs /path/to/artifacts --target-project-dir /path/to/target-react-project
+legacy-delphi-analyzer build-patch-apply /path/to/artifacts --target-project-dir /path/to/target-react-project
+legacy-delphi-analyzer build-repo-validation /path/to/artifacts --target-project-dir /path/to/target-react-project
 legacy-delphi-analyzer build-repair-tasks /path/to/artifacts
 legacy-delphi-analyzer build-progress-report /path/to/artifacts
 legacy-delphi-analyzer build-handoff-packs /path/to/artifacts
@@ -279,6 +283,10 @@ Use these generated outputs to reduce trial-and-error:
   Shows which bounded slices already overlap with the target transition repo.
 - `llm-pack/patch-validation/`
   Shows whether each bounded patch slice is ready, risky, or needs repair.
+- `llm-pack/patch-apply-assistant/`
+  Gives one bounded patch prompt plus the allowed-file list for each slice.
+- `llm-pack/repo-validation-gate/`
+  Shows target repo placement, route, and package issues before the next slice.
 - `runtime/repair-tasks/`
   Gives you the next bounded repair prompt after validation or merge issues.
 - `runtime/progress/`

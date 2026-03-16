@@ -23,6 +23,7 @@ def build_task_studio(
         validation = _load_json(task_dir / "validation-result.json") or {}
         response_file = _resolve_response_file(runtime_dir, task_dir, taskpack.task_id)
         status = _task_status(task_dir, response_file, validation)
+        context_size_hint = _context_size_hint(taskpack.context_budget_tokens)
         task = TaskStudioTask(
             task_id=taskpack.task_id,
             task_type=taskpack.task_type,
@@ -30,12 +31,20 @@ def build_task_studio(
             subject_name=taskpack.subject_name,
             priority=taskpack.priority,
             status=status,
+            context_budget_tokens=taskpack.context_budget_tokens,
+            context_size_hint=context_size_hint,
             prompt_file=(task_dir / "primary-prompt.txt").as_posix(),
+            fallback_prompt_file=(task_dir / "fallback-prompt.txt").as_posix(),
+            verification_prompt_file=(task_dir / "verification-prompt.txt").as_posix(),
             compiled_context_file=(task_dir / "compiled-context.md").as_posix(),
+            response_template_file=(task_dir / "vscode-cline-response-template.json").as_posix(),
+            vscode_prompt_file=(task_dir / "vscode-cline-copy-prompt.txt").as_posix(),
             expected_schema_file=(task_dir / "agent-expected-output-schema.json").as_posix(),
             response_file=response_file.as_posix() if response_file else None,
             validation_file=(task_dir / "validation-result.json").as_posix(),
+            validation_status=str(validation.get("status") or "") or None,
             retry_plan_file=(task_dir / "retry-plan.md").as_posix(),
+            retry_needed=str(validation.get("status") or "") not in {"", "accepted", "accepted_with_warnings"},
             copy_prompt_command=f"cat {task_dir / 'vscode-cline-copy-prompt.txt'}",
             validate_command=f"legacy-delphi-analyzer validate-response {analysis_dir} {taskpack.task_id}",
             retry_command=f"legacy-delphi-analyzer retry-plan {analysis_dir} {taskpack.task_id}",
@@ -46,6 +55,7 @@ def build_task_studio(
             notes=[
                 f"profile={taskpack.target_model_profile}",
                 f"context_budget_tokens={taskpack.context_budget_tokens}",
+                f"context_size_hint={context_size_hint}",
                 f"source_prompt={taskpack.source_prompt_name or 'none'}",
             ],
         )
@@ -67,11 +77,13 @@ def build_task_studio(
             "Force JSON-only output from Cline/qwen3.",
             "Run validate-response before moving to the next task.",
             "Use retry-plan if validation does not pass.",
+            "If the task is still bounded enough, move to patch-apply and repo-validation after acceptance.",
         ],
         "tasks": [to_jsonable(item) for item in tasks],
     }
     write_json(runtime_dir / "task-studio.json", payload)
     write_text(runtime_dir / "task-studio.md", render_task_studio_markdown(payload))
+    write_text(runtime_dir / "task-studio" / "workflow.md", _render_workflow_markdown(payload))
     return payload
 
 
@@ -102,6 +114,7 @@ def render_task_studio_markdown(payload: dict[str, Any]) -> str:
                 f"### {item.get('task_id')}",
                 f"- Type: {item.get('task_type')}",
                 f"- Status: {item.get('status')}",
+                f"- Budget: {item.get('context_budget_tokens', 0)} tokens ({item.get('context_size_hint', 'small')})",
                 f"- Module: {item.get('module_name') or 'None'}",
                 f"- Subject: {item.get('subject_name') or 'None'}",
                 f"- Validate: `{item.get('validate_command')}`",
@@ -120,15 +133,25 @@ def _render_task_detail(task: TaskStudioTask) -> str:
 - Module: {task.module_name or 'None'}
 - Subject: {task.subject_name or 'None'}
 - Priority: {task.priority}
+- Budget: {task.context_budget_tokens} ({task.context_size_hint})
 
 ## Files
 
 - Prompt: `{task.prompt_file or 'None'}`
+- Fallback prompt: `{task.fallback_prompt_file or 'None'}`
+- Verification prompt: `{task.verification_prompt_file or 'None'}`
 - Compiled context: `{task.compiled_context_file or 'None'}`
+- Response template: `{task.response_template_file or 'None'}`
+- VSCode prompt: `{task.vscode_prompt_file or 'None'}`
 - Expected schema: `{task.expected_schema_file or 'None'}`
 - Response: `{task.response_file or 'None'}`
 - Validation: `{task.validation_file or 'None'}`
 - Retry plan: `{task.retry_plan_file or 'None'}`
+
+## Runtime Status
+
+- Validation status: `{task.validation_status or 'None'}`
+- Retry needed: `{str(task.retry_needed).lower()}`
 
 ## Commands
 
@@ -171,3 +194,27 @@ def _load_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return None
+
+
+def _context_size_hint(context_budget_tokens: int) -> str:
+    if context_budget_tokens >= 10000:
+        return "large"
+    if context_budget_tokens >= 6000:
+        return "medium"
+    return "small"
+
+
+def _render_workflow_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# Task Studio 2.0 Workflow",
+        "",
+        "1. Open one task only.",
+        "2. Copy the bounded prompt or use the generated prompt.txt session file.",
+        "3. Save the JSON response into agent-response.json.",
+        "4. Run validate-response immediately.",
+        "5. If validation fails, use retry-plan instead of broadening the task.",
+        "6. After acceptance, use patch-apply or repo-validation for the target repo stage.",
+        "",
+        f"- Current task count: {payload.get('task_count', 0)}",
+    ]
+    return "\n".join(lines).strip() + "\n"

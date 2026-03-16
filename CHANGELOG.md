@@ -1,5 +1,14 @@
 # Changelog
 
+## v6.3.0
+
+- Added a `patch apply assistant` that emits allowed-files bundles, apply-order guides, post-change checklists, and bounded patch prompts for one React page or Spring endpoint slice at a time.
+- Added a `repo validation gate` that checks bounded patch slices against a target repo layout and turns placement or package issues into repair-oriented follow-up prompts.
+- Upgraded `Task Studio` into a richer task-by-task workbench with token-budget hints, response-template references, prompt-variant paths, validation status, and a generated workflow guide.
+- Expanded the HTML workbench with new `Task Studio 2.0`, `Patch Apply Assistant`, and `Repo Validation Gate` panels for faster Cline/VSCode task execution.
+- Updated the controlled delivery pipeline to include patch-apply preparation and repo validation before final delivery slices.
+- Added regression coverage for patch-apply bundles, repo validation, and Task Studio 2.0 outputs.
+
 ## v6.0.0
 
 - Added transition workspace sync reports so bounded React and Spring Boot patch slices can be compared against an existing transition repo before sending them to weak Cline/qwen3 sessions.

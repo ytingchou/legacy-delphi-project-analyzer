@@ -6,10 +6,12 @@ from typing import Any
 from legacy_delphi_project_analyzer.delivery import deliver_slices
 from legacy_delphi_project_analyzer.developer_handoff import build_developer_handoff_packs
 from legacy_delphi_project_analyzer.failure_replay import build_failure_replay_lab
+from legacy_delphi_project_analyzer.patch_apply import build_patch_apply_assistant
 from legacy_delphi_project_analyzer.patch_packs import build_code_patch_packs
 from legacy_delphi_project_analyzer.patch_validation import validate_patch_packs
 from legacy_delphi_project_analyzer.progress_layer import update_progress_report
 from legacy_delphi_project_analyzer.repair_tasks import build_repair_tasks
+from legacy_delphi_project_analyzer.repo_validation import build_repo_validation_gate
 from legacy_delphi_project_analyzer.target_integration import build_target_project_integration_pack
 from legacy_delphi_project_analyzer.workspace_sync import build_transition_workspace_sync
 from legacy_delphi_project_analyzer.utils import ensure_directory, write_json, write_text
@@ -32,6 +34,12 @@ def run_controlled_delivery(
 
     patch_manifest = build_code_patch_packs(analysis_dir=analysis_dir, output=output)
     steps.append({"step": "build_patch_packs", "status": "completed", "path": (analysis_dir / "llm-pack" / "code-patch-packs" / "manifest.json").as_posix()})
+    patch_apply_manifest = build_patch_apply_assistant(
+        analysis_dir,
+        output=output,
+        target_project_dir=target_project_dir,
+    )
+    steps.append({"step": "build_patch_apply", "status": "completed", "path": (analysis_dir / "llm-pack" / "patch-apply-assistant" / "manifest.json").as_posix()})
 
     handoff_manifest = build_developer_handoff_packs(analysis_dir, output=output)
     steps.append({"step": "build_handoff_packs", "status": "completed", "path": (analysis_dir / "delivery-handoff" / "manifest.json").as_posix()})
@@ -43,6 +51,12 @@ def run_controlled_delivery(
     steps.append({"step": "build_failure_replay", "status": "completed", "path": (runtime_dir / "failure-replay" / "manifest.json").as_posix()})
 
     patch_validation_report = None
+    repo_validation_report = build_repo_validation_gate(
+        analysis_dir,
+        output=output,
+        target_project_dir=target_project_dir,
+    )
+    steps.append({"step": "build_repo_validation", "status": "completed", "path": (analysis_dir / "llm-pack" / "repo-validation-gate" / "repo-validation.json").as_posix()})
     workspace_sync_report = None
     target_manifest = None
     if target_project_dir is not None:
@@ -58,6 +72,7 @@ def run_controlled_delivery(
         runtime_dir=runtime_dir,
         runtime_error_summary=output.runtime_error_summary,
         patch_validation_report=patch_validation_report,
+        repo_validation_report=repo_validation_report,
     )
     steps.append({"step": "build_repair_tasks", "status": "completed", "path": (runtime_dir / "repair-tasks" / "repair-tasks.json").as_posix()})
 
@@ -75,12 +90,14 @@ def run_controlled_delivery(
         "steps": steps,
         "summary": {
             "patch_count": patch_manifest.get("patch_count", 0),
+            "patch_apply_count": patch_apply_manifest.get("entry_count", 0),
             "handoff_count": handoff_manifest.get("entry_count", 0),
             "replay_count": replay_manifest.get("entry_count", 0),
             "repair_count": repair_manifest.get("entry_count", 0),
             "delivery_count": delivery_manifest.get("delivery_count", 0),
             "workspace_sync_count": workspace_sync_report.get("entry_count", 0) if workspace_sync_report else 0,
             "patch_validation_count": patch_validation_report.get("entry_count", 0) if patch_validation_report else 0,
+            "repo_validation_count": repo_validation_report.get("entry_count", 0) if repo_validation_report else 0,
         },
     }
     write_json(control_dir / "controlled-delivery-manifest.json", payload)
