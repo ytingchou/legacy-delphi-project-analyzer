@@ -5,7 +5,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -165,7 +165,7 @@ def run_llm_artifact(
         timeout_seconds=timeout_seconds,
     )
     response_text = _extract_response_text(response_payload)
-    run_id = f"{slugify(artifact_name)}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+    run_id = f"{slugify(artifact_name)}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     run_dir = analysis_dir / "llm-runs"
     run_json_path = run_dir / f"{run_id}.json"
     run_md_path = run_dir / f"{run_id}.md"

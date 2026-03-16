@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from legacy_delphi_project_analyzer.cheatsheet import write_runtime_cheat_sheet
 from legacy_delphi_project_analyzer.cline_session import build_cline_session_manifest
+from legacy_delphi_project_analyzer.developer_handoff import build_developer_handoff_packs
 from legacy_delphi_project_analyzer.failure_replay import build_failure_replay_lab
 from legacy_delphi_project_analyzer.golden_tasks import evaluate_golden_tasks
 from legacy_delphi_project_analyzer.human_review import build_review_summary
+from legacy_delphi_project_analyzer.multi_repo_map import build_multi_repo_transition_map
 from legacy_delphi_project_analyzer.patch_packs import build_code_patch_packs
+from legacy_delphi_project_analyzer.progress_layer import update_progress_report
 from legacy_delphi_project_analyzer.phase_state import (
     ArtifactCompleteness,
     LoopMetrics,
@@ -41,6 +44,7 @@ from legacy_delphi_project_analyzer.runtime_errors import (
     load_review_summary,
     write_runtime_error_summary,
 )
+from legacy_delphi_project_analyzer.repair_tasks import build_repair_tasks
 from legacy_delphi_project_analyzer.task_studio import build_task_studio
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, write_taskpacks
 from legacy_delphi_project_analyzer.utils import ensure_directory, write_json, write_text
@@ -178,7 +182,7 @@ def refresh_runtime_artifacts(
     previous_state = load_run_state(runtime_dir)
     current_phase = determine_current_phase(phase_states)
     run_state = previous_state or RunState(
-        run_id=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+        run_id=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
         project_root=output.inventory.project_root,
         analysis_dir=output_root.as_posix(),
         target_model_profile=target_model_profile,
@@ -203,7 +207,7 @@ def refresh_runtime_artifacts(
     run_state.required_artifacts = completeness.required_count
     run_state.status = _derive_runtime_status(current_phase, blockers, completeness)
     run_state.stop_reason = None if run_state.status != "completed" else "all_required_artifacts_ready"
-    run_state.last_updated_at = datetime.now(UTC).isoformat()
+    run_state.last_updated_at = datetime.now(timezone.utc).isoformat()
 
     save_run_state(runtime_dir, run_state)
     save_loop_metrics(runtime_dir, metrics)
@@ -266,8 +270,32 @@ def refresh_runtime_artifacts(
         runtime_dir=runtime_dir,
         output=output,
     )
+    output.progress_report = update_progress_report(
+        output_root,
+        runtime_dir=runtime_dir,
+        output=output,
+    )
+    output.developer_handoff_manifest = build_developer_handoff_packs(
+        output_root,
+        output=output,
+    )
+    output.multi_repo_transition_map = build_multi_repo_transition_map(
+        output_root,
+        output=output,
+    )
+    output.workspace_sync_report = _load_json(output_root / "llm-pack" / "workspace-sync" / "workspace-sync.json")
+    output.patch_validation_report = _load_json(output_root / "llm-pack" / "patch-validation" / "patch-validation.json")
+    output.repair_task_manifest = build_repair_tasks(
+        output_root,
+        runtime_dir=runtime_dir,
+        runtime_error_summary=runtime_error_summary,
+        patch_validation_report=output.patch_validation_report,
+    )
     output.target_integration_assistant = _load_json(
         output_root / "llm-pack" / "target-integration" / "target-integration-assistant-manifest.json"
+    )
+    output.controlled_delivery_manifest = _load_json(
+        output_root / "delivery-control" / "controlled-delivery-manifest.json"
     )
     report_dir = output_root / "report"
     if report_dir.exists():
@@ -389,7 +417,7 @@ def _build_handoff_manifest(
         if isinstance(item, dict)
     }
     return {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "project_root": output.inventory.project_root,
         "module_count": len(output.transition_mapping.modules),
         "transition_spec_count": len(output.transition_specs),

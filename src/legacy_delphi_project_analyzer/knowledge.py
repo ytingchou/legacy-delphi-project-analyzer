@@ -3,7 +3,7 @@ from __future__ import annotations
 import fnmatch
 import json
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Any
@@ -188,7 +188,7 @@ class KnowledgeStore:
         self.learned["unresolved_placeholders"] = dict(unresolved)
         self.learned["missing_xml_refs"] = dict(missing_xml)
         self.learned["missing_query_refs"] = dict(missing_query)
-        self.learned["updated_at"] = datetime.now(UTC).isoformat()
+        self.learned["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         suggested_overrides = self._build_suggested_overrides(
             missing_xml_refs=list(missing_xml.keys()),

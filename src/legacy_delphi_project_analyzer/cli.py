@@ -10,11 +10,15 @@ from legacy_delphi_project_analyzer.cheatsheet import write_analysis_cheat_sheet
 from legacy_delphi_project_analyzer.cline_bridge import run_cline_wrapper
 from legacy_delphi_project_analyzer.cline_session import build_cline_session_manifest
 from legacy_delphi_project_analyzer.console import CliReporter, render_cli_exception
+from legacy_delphi_project_analyzer.controlled_delivery import run_controlled_delivery
+from legacy_delphi_project_analyzer.developer_handoff import build_developer_handoff_packs
 from legacy_delphi_project_analyzer.failure_replay import build_failure_replay_lab
 from legacy_delphi_project_analyzer.feedback import ingest_feedback
 from legacy_delphi_project_analyzer.golden_tasks import evaluate_golden_tasks
 from legacy_delphi_project_analyzer.human_review import record_task_review
 from legacy_delphi_project_analyzer.llm import run_llm_artifact, validate_openai_compatible_provider
+from legacy_delphi_project_analyzer.multi_repo_map import build_multi_repo_transition_map
+from legacy_delphi_project_analyzer.patch_validation import validate_patch_packs
 from legacy_delphi_project_analyzer.cline import emit_cline_task
 from legacy_delphi_project_analyzer.delivery import deliver_slices
 from legacy_delphi_project_analyzer.agent_loop import (
@@ -34,11 +38,14 @@ from legacy_delphi_project_analyzer.orchestrator import (
 )
 from legacy_delphi_project_analyzer.patch_packs import build_code_patch_packs
 from legacy_delphi_project_analyzer.pipeline import PHASE_ORDER, run_analysis
+from legacy_delphi_project_analyzer.progress_layer import update_progress_report
 from legacy_delphi_project_analyzer.runtime_errors import save_provider_health
+from legacy_delphi_project_analyzer.repair_tasks import build_repair_tasks
 from legacy_delphi_project_analyzer.subagents import run_subagent_batches
 from legacy_delphi_project_analyzer.task_studio import build_task_studio
 from legacy_delphi_project_analyzer.taskpacks import build_taskpacks, load_taskpack, write_taskpacks
 from legacy_delphi_project_analyzer.target_integration import build_target_project_integration_pack
+from legacy_delphi_project_analyzer.workspace_sync import build_transition_workspace_sync
 from legacy_delphi_project_analyzer.workspace_graph import build_workspace_graph
 
 
@@ -424,6 +431,89 @@ def build_parser() -> argparse.ArgumentParser:
     )
     golden_tasks_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
 
+    workspace_sync_parser = subparsers.add_parser(
+        "build-workspace-sync",
+        help="Compare patch packs with a target transition workspace and summarize sync state.",
+    )
+    workspace_sync_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    workspace_sync_parser.add_argument("target_project_dir", help="Path to the target React or web transition project root.")
+    workspace_sync_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/workspace-sync.",
+    )
+
+    patch_validation_parser = subparsers.add_parser(
+        "validate-patch-packs",
+        help="Validate bounded React and Spring Boot patch packs before handing them to a weak model.",
+    )
+    patch_validation_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    patch_validation_parser.add_argument(
+        "--target-project-dir",
+        default=None,
+        help="Optional target project root for merge-aware validation.",
+    )
+    patch_validation_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/patch-validation.",
+    )
+
+    repair_tasks_parser = subparsers.add_parser(
+        "build-repair-tasks",
+        help="Build interactive repair tasks from runtime errors and patch validation failures.",
+    )
+    repair_tasks_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+
+    progress_parser = subparsers.add_parser(
+        "build-progress-report",
+        help="Persist a management-facing progress snapshot and trend report.",
+    )
+    progress_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+
+    handoff_parser = subparsers.add_parser(
+        "build-handoff-packs",
+        help="Generate developer handoff packs with implementation briefs and patch checklists.",
+    )
+    handoff_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    handoff_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/delivery-handoff.",
+    )
+
+    transition_map_parser = subparsers.add_parser(
+        "build-transition-map",
+        help="Generate a multi-repo transition map showing reusable roots and shared query families.",
+    )
+    transition_map_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    transition_map_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/llm-pack/multi-repo-transition-map.",
+    )
+
+    controlled_delivery_parser = subparsers.add_parser(
+        "run-controlled-delivery",
+        help="Run the controlled delivery pipeline: patch packs, sync, validation, repair, handoff, and slice delivery.",
+    )
+    controlled_delivery_parser.add_argument("analysis_dir", help="Path to a generated analysis artifact root.")
+    controlled_delivery_parser.add_argument(
+        "--target-project-dir",
+        default=None,
+        help="Optional target React or web transition project root.",
+    )
+    controlled_delivery_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional output directory. Defaults to <analysis_dir>/delivery-control.",
+    )
+    controlled_delivery_parser.add_argument(
+        "--allow-unvalidated",
+        action="store_true",
+        help="Allow the final delivery slice stage even when validation is incomplete.",
+    )
+
     subagents_parser = subparsers.add_parser(
         "run-subagents",
         help="Plan and dispatch a bounded batch of prompt-pack subagent tasks.",
@@ -503,6 +593,13 @@ def build_parser() -> argparse.ArgumentParser:
         workspace_graph_parser,
         failure_replay_parser,
         golden_tasks_parser,
+        workspace_sync_parser,
+        patch_validation_parser,
+        repair_tasks_parser,
+        progress_parser,
+        handoff_parser,
+        transition_map_parser,
+        controlled_delivery_parser,
         subagents_parser,
         delivery_parser,
     ):
@@ -1017,6 +1114,101 @@ def _run_command(args, reporter: CliReporter) -> int:
         )
         reporter.info(f"Golden task types evaluated: {report['task_type_count']}")
         reporter.info(f"Golden task report: {analysis_dir / 'runtime' / 'golden-tasks' / 'golden-task-evaluation.json'}")
+        return 0
+    if args.command == "build-workspace-sync":
+        reporter.progress("Building transition workspace sync report")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        manifest = build_transition_workspace_sync(
+            analysis_dir,
+            Path(args.target_project_dir),
+            output=output,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        reporter.info(f"Workspace sync entries: {manifest['entry_count']}")
+        reporter.info(f"Workspace sync report: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'workspace-sync') / 'workspace-sync.json'}")
+        return 0
+    if args.command == "validate-patch-packs":
+        reporter.progress("Validating bounded patch packs")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        manifest = validate_patch_packs(
+            analysis_dir,
+            output=output,
+            target_project_dir=Path(args.target_project_dir) if args.target_project_dir else None,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        reporter.info(f"Patch validation entries: {manifest['entry_count']}")
+        reporter.info(f"Patch validation report: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'patch-validation') / 'patch-validation.json'}")
+        return 0
+    if args.command == "build-repair-tasks":
+        reporter.progress("Building interactive repair tasks")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        runtime_dir = analysis_dir / "runtime"
+        patch_validation_report = None
+        patch_validation_path = analysis_dir / "llm-pack" / "patch-validation" / "patch-validation.json"
+        if patch_validation_path.exists():
+            import json
+            patch_validation_report = json.loads(patch_validation_path.read_text(encoding="utf-8"))
+        manifest = build_repair_tasks(
+            analysis_dir,
+            runtime_dir=runtime_dir,
+            runtime_error_summary=output.runtime_error_summary,
+            patch_validation_report=patch_validation_report,
+        )
+        reporter.info(f"Repair tasks: {manifest['entry_count']}")
+        reporter.info(f"Repair task manifest: {runtime_dir / 'repair-tasks' / 'repair-tasks.json'}")
+        return 0
+    if args.command == "build-progress-report":
+        reporter.progress("Updating management progress report")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        report = update_progress_report(
+            analysis_dir,
+            runtime_dir=analysis_dir / "runtime",
+            output=output,
+        )
+        reporter.info(f"Progress snapshots: {report['snapshot_count']}")
+        reporter.info(f"Progress report: {analysis_dir / 'runtime' / 'progress' / 'progress-report.json'}")
+        return 0
+    if args.command == "build-handoff-packs":
+        reporter.progress("Generating developer handoff packs")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        manifest = build_developer_handoff_packs(
+            analysis_dir,
+            output=output,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        reporter.info(f"Handoff packs: {manifest['entry_count']}")
+        reporter.info(f"Handoff manifest: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'delivery-handoff') / 'manifest.json'}")
+        return 0
+    if args.command == "build-transition-map":
+        reporter.progress("Generating multi-repo transition map")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        manifest = build_multi_repo_transition_map(
+            analysis_dir,
+            output=output,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+        )
+        reporter.info(f"Transition roots: {manifest['root_count']}")
+        reporter.info(f"Transition map: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'llm-pack' / 'multi-repo-transition-map') / 'multi-repo-transition-map.json'}")
+        return 0
+    if args.command == "run-controlled-delivery":
+        reporter.progress("Running controlled delivery pipeline")
+        analysis_dir = Path(args.analysis_dir).resolve()
+        output = rerun_analysis_from_runtime_state(analysis_dir)
+        manifest = run_controlled_delivery(
+            analysis_dir,
+            output=output,
+            target_project_dir=Path(args.target_project_dir) if args.target_project_dir else None,
+            output_dir=Path(args.output_dir) if args.output_dir else None,
+            allow_unvalidated=args.allow_unvalidated,
+        )
+        reporter.info(f"Controlled delivery steps: {manifest['step_count']}")
+        reporter.info(f"Controlled delivery manifest: {(Path(args.output_dir).resolve() if args.output_dir else analysis_dir / 'delivery-control') / 'controlled-delivery-manifest.json'}")
         return 0
     if args.command == "run-subagents":
         reporter.progress("Planning and dispatching bounded subagent batches")

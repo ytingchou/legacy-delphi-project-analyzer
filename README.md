@@ -36,6 +36,13 @@ for a 128k-token LLM to continue a React + Spring Boot migration.
 - Failure replay lab bundles for retry and debugging
 - Golden task evaluation scorecards for weak-model benchmarking
 - Target integration assistant manifests with merge checklists and route alignment scores
+- Transition workspace sync reports against an existing web transition repo
+- Patch validation gates for bounded React and Spring Boot patch packs
+- Interactive repair-task manifests built from runtime errors and patch validation failures
+- Management-facing progress snapshots and readiness trend reports
+- Developer handoff packs with implementation briefs and patch checklists
+- Multi-repo transition maps for reusable roots and shared SQL families
+- Controlled delivery pipelines that chain sync, validation, repair, handoff, and final slice packaging
 - Response validators, validator-driven retry plans, bounded agent-loop execution, auto-compact task contexts, and validated code skeleton generation
 
 ## Usage
@@ -49,6 +56,8 @@ Or after installation:
 ```bash
 legacy-delphi-analyzer analyze /path/to/project --output-dir artifacts
 ```
+
+If you invoke the module directly, use Python `3.11+`.
 
 If you need the fastest artifact-to-Cline workflow, start with
 [docs/quick-start-cline.md](/Users/housechou/vibe_coding/legacy-delphi-project-analyzer/docs/quick-start-cline.md).
@@ -170,6 +179,25 @@ legacy-delphi-analyzer build-failure-replay /path/to/artifacts
 legacy-delphi-analyzer evaluate-golden-tasks /path/to/artifacts
 ```
 
+Sync bounded patch packs with a target transition workspace, validate them, and generate repair tasks:
+
+```bash
+legacy-delphi-analyzer build-workspace-sync /path/to/artifacts /path/to/target-project
+legacy-delphi-analyzer validate-patch-packs /path/to/artifacts --target-project-dir /path/to/target-project
+legacy-delphi-analyzer build-repair-tasks /path/to/artifacts
+legacy-delphi-analyzer build-progress-report /path/to/artifacts
+legacy-delphi-analyzer build-handoff-packs /path/to/artifacts
+legacy-delphi-analyzer build-transition-map /path/to/artifacts
+```
+
+Run the full controlled delivery pipeline for a target transition project:
+
+```bash
+legacy-delphi-analyzer run-controlled-delivery /path/to/artifacts \
+  --target-project-dir /path/to/target-project \
+  --allow-unvalidated
+```
+
 Run bounded prompt-pack batches as file-based subagents:
 
 ```bash
@@ -270,6 +298,12 @@ The HTML report now includes a runtime workbench view with:
 - failure replay lab
 - golden task evaluation
 - code patch packs
+- workspace sync
+- patch validation
+- repair tasks
+- progress layer
+- developer handoff packs
+- controlled delivery
 - human review summary
 - direct bounded-workflow guidance for Cline users
 

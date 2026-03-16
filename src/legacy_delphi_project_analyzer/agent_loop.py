@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -134,7 +134,7 @@ def run_loop(
                     "dispatch_mode": dispatch_mode,
                     "prompt_mode": prompt_mode,
                     "status": run_state.status,
-                    "recorded_at": datetime.now(UTC).isoformat(),
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
             _save_loop_files(runtime_dir, run_state, attempts, history)
@@ -275,7 +275,7 @@ def validate_task_response(
         rejection_category=rejection_category,
         should_learn=status in {"accepted", "accepted_with_warnings"},
         should_retry=status in {"needs_follow_up", "rejected"},
-        validated_at=datetime.now(UTC).isoformat(),
+        validated_at=datetime.now(timezone.utc).isoformat(),
     )
     retry_plan = build_retry_plan(analysis_dir=analysis_dir, taskpack=taskpack, record=record)
     record.validator_feedback = [str(item) for item in retry_plan.get("validator_feedback", [])]

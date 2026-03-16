@@ -14,6 +14,7 @@ The goal is simple:
 3. Feed only one task pack at a time into Cline.
 4. Save JSON output back into the artifact directory.
 5. Validate, retry, and reuse replay or patch-pack artifacts when needed.
+6. When you are ready to integrate into the target web repo, use workspace sync, patch validation, repair tasks, and controlled delivery.
 
 Do not load the whole repo or the whole `llm-pack/` into Cline.
 
@@ -55,6 +56,8 @@ Use:
 - `runtime/cline-cheat-sheet.md` for the current top blocker tasks and exact commands
 - `runtime/task-studio.md` for task status and exact validate/retry commands
 - `runtime/cline-session/quick-start.md` for prebuilt `prompt.txt` session bundles
+- `runtime/progress/progress-report.md` for current readiness and blocker trends
+- `delivery-handoff/README.md` for engineer-facing handoff entry points
 
 ## 3. Pick One Task Only
 
@@ -233,6 +236,18 @@ If the same task still fails, open:
 - `runtime/failure-replay/<task-id>/replay.md`
 - `runtime/failure-replay/<task-id>/manifest.json`
 
+When the task is moving into the real transition workspace, also run:
+
+```bash
+legacy-delphi-analyzer build-workspace-sync /path/to/artifacts /path/to/target-react-project
+legacy-delphi-analyzer validate-patch-packs /path/to/artifacts --target-project-dir /path/to/target-react-project
+legacy-delphi-analyzer build-repair-tasks /path/to/artifacts
+legacy-delphi-analyzer build-progress-report /path/to/artifacts
+legacy-delphi-analyzer build-handoff-packs /path/to/artifacts
+legacy-delphi-analyzer build-transition-map /path/to/artifacts
+legacy-delphi-analyzer run-controlled-delivery /path/to/artifacts --target-project-dir /path/to/target-react-project --allow-unvalidated
+```
+
 ## 8. Task Order That Usually Works Best
 
 When time is short, do tasks in this order:
@@ -260,6 +275,18 @@ Use these generated outputs to reduce trial-and-error:
   Contains replay bundles for tasks that failed validation.
 - `runtime/golden-tasks/golden-task-evaluation.md`
   Shows which task types currently work best with your weak model.
+- `llm-pack/workspace-sync/`
+  Shows which bounded slices already overlap with the target transition repo.
+- `llm-pack/patch-validation/`
+  Shows whether each bounded patch slice is ready, risky, or needs repair.
+- `runtime/repair-tasks/`
+  Gives you the next bounded repair prompt after validation or merge issues.
+- `runtime/progress/`
+  Gives management-facing readiness and blocker trend snapshots.
+- `delivery-handoff/`
+  Gives implementation briefs, patch checklists, and known-gap summaries.
+- `delivery-control/`
+  Gives one manifest that chains sync, validation, repair, handoff, and delivery.
 
 ## 10. Recommended Artifact Families
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,7 @@ def record_task_review(
         "reviewer": reviewer or "",
         "response_path": response_path.as_posix(),
         "validated_status": validation.get("status"),
-        "recorded_at": datetime.now(UTC).isoformat(),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
     reviews_dir = runtime_dir / "reviews"
     ensure_directory(reviews_dir)

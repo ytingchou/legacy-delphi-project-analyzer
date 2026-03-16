@@ -180,6 +180,13 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         "target_integration_assistant": output.target_integration_assistant,
         "failure_replay_lab": output.failure_replay_lab,
         "golden_task_evaluation": output.golden_task_evaluation,
+        "workspace_sync_report": output.workspace_sync_report,
+        "patch_validation_report": output.patch_validation_report,
+        "repair_task_manifest": output.repair_task_manifest,
+        "progress_report": output.progress_report,
+        "developer_handoff_manifest": output.developer_handoff_manifest,
+        "multi_repo_transition_map": output.multi_repo_transition_map,
+        "controlled_delivery_manifest": output.controlled_delivery_manifest,
         "diagnostic_count": len(output.diagnostics),
     }
     data_json = json.dumps(to_jsonable(payload), ensure_ascii=False)
@@ -239,6 +246,26 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             "Golden Tasks",
             str((output.golden_task_evaluation or {}).get("task_type_count", 0)),
             "Weak-model scorecard",
+        ),
+        (
+            "Workspace Sync",
+            str((output.workspace_sync_report or {}).get("entry_count", 0)),
+            "Target sync slices",
+        ),
+        (
+            "Patch Validation",
+            str((output.patch_validation_report or {}).get("entry_count", 0)),
+            "Patch-gate entries",
+        ),
+        (
+            "Repair Tasks",
+            str((output.repair_task_manifest or {}).get("entry_count", 0)),
+            "Interactive repair queue",
+        ),
+        (
+            "Handoff Packs",
+            str((output.developer_handoff_manifest or {}).get("entry_count", 0)),
+            "Developer delivery briefs",
         ),
         ("Diagnostics", str(report.total_diagnostics), "Warnings + errors"),
         ("Unresolved", str(report.total_unresolved_placeholders), "Legacy placeholders"),
@@ -326,6 +353,13 @@ def build_web_report_html(output: AnalysisOutput) -> str:
     failure_replay = output.failure_replay_lab or {"entry_count": 0, "counts_by_category": {}, "entries": []}
     golden_eval = output.golden_task_evaluation or {"task_type_count": 0, "leaderboard": [], "global_recommendations": []}
     target_assistant = output.target_integration_assistant or {"entry_count": 0, "high_risk_count": 0, "entries": []}
+    workspace_sync = output.workspace_sync_report or {"entry_count": 0, "counts_by_state": {}, "entries": []}
+    patch_validation = output.patch_validation_report or {"entry_count": 0, "counts_by_status": {}, "entries": []}
+    repair_tasks = output.repair_task_manifest or {"entry_count": 0, "entries": []}
+    progress_report = output.progress_report or {"snapshot_count": 0, "latest": {}, "management_notes": []}
+    developer_handoff = output.developer_handoff_manifest or {"entry_count": 0, "entries": []}
+    transition_map = output.multi_repo_transition_map or {"root_count": 0, "roots": [], "reusable_query_families": []}
+    controlled_delivery = output.controlled_delivery_manifest or {"step_count": 0, "summary": {}, "steps": []}
     prompt_rows = ""
     prompt_summary_markup = "<li>No prompt feedback has been imported yet.</li>"
     if prompt_effectiveness is not None:
@@ -471,6 +505,78 @@ def build_web_report_html(output: AnalysisOutput) -> str:
             f"<li>Entries: {target_assistant.get('entry_count', 0)}</li>",
             f"<li>High-risk entries: {target_assistant.get('high_risk_count', 0)}</li>",
             "<li>Build with build-target-pack or build-target-assistant against the real React target project.</li>",
+        ]
+    )
+    workspace_sync_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('module_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('slice_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('integration_state') or 'unknown'))}</td>
+          <td>{len(item.get('existing_files', []))}</td>
+          <td>{len(item.get('missing_files', []))}</td>
+        </tr>
+        """
+        for item in workspace_sync.get("entries", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="5">No workspace sync report generated yet.</td></tr>
+    """
+    patch_validation_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('module_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('slice_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('status') or 'unknown'))}</td>
+          <td>{escape(', '.join(item.get('issues', [])) or 'None')}</td>
+        </tr>
+        """
+        for item in patch_validation.get("entries", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="4">No patch validation report generated yet.</td></tr>
+    """
+    repair_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('repair_id') or 'unknown'))}</td>
+          <td>{escape(str(item.get('source') or 'unknown'))}</td>
+          <td>{escape(str(item.get('title') or 'unknown'))}</td>
+          <td><code>{escape(str(item.get('next_command') or ''))}</code></td>
+        </tr>
+        """
+        for item in repair_tasks.get("entries", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="4">No repair tasks generated yet.</td></tr>
+    """
+    progress_markup = "\n".join(
+        f"<li>{escape(str(item))}</li>" for item in progress_report.get("management_notes", [])
+    ) or "<li>No progress snapshots recorded yet.</li>"
+    handoff_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(str(item.get('module_name') or 'unknown'))}</td>
+          <td>{escape(str(item.get('first_slice') or 'unknown'))}</td>
+          <td>{escape(str(item.get('readiness_level') or 'unknown'))}</td>
+          <td><code>{escape(str(item.get('implementation_brief') or ''))}</code></td>
+        </tr>
+        """
+        for item in developer_handoff.get("entries", [])[:10]
+        if isinstance(item, dict)
+    ) or """
+        <tr><td colspan="4">No developer handoff packs generated yet.</td></tr>
+    """
+    transition_map_markup = "\n".join(
+        [
+            f"<li>Roots: {transition_map.get('root_count', 0)}</li>",
+            f"<li>Reusable query families: {len(transition_map.get('reusable_query_families', []))}</li>",
+        ]
+    )
+    controlled_delivery_markup = "\n".join(
+        [
+            f"<li>Step count: {controlled_delivery.get('step_count', 0)}</li>",
+            f"<li>Summary: {escape(', '.join(f'{key}={value}' for key, value in sorted((controlled_delivery.get('summary') or {}).items())) or 'none')}</li>",
         ]
     )
     return f"""<!DOCTYPE html>
@@ -669,6 +775,24 @@ def build_web_report_html(output: AnalysisOutput) -> str:
 
       <section class="grid">
         <article class="panel">
+          <h2>Progress Layer</h2>
+          <ul>{progress_markup}</ul>
+          <ul>
+            <li>Progress snapshots are stored under <code>runtime/progress/</code>.</li>
+            <li>Use this section for PM and leadership updates.</li>
+          </ul>
+        </article>
+        <article class="panel">
+          <h2>Multi-Repo Transition Map</h2>
+          <ul>{transition_map_markup}</ul>
+          <ul>
+            <li>Use this to spot reusable shared SQL/XML families across common roots.</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
           <h2>Prompt Effectiveness Summary</h2>
           <ul>{prompt_summary_markup}</ul>
         </article>
@@ -843,6 +967,86 @@ def build_web_report_html(output: AnalysisOutput) -> str:
         </article>
       </section>
 
+      <section class="grid">
+        <article class="panel">
+          <h2>Workspace Sync</h2>
+          <ul>
+            <li>Entries: {workspace_sync.get('entry_count', 0)}</li>
+            <li>States: {escape(', '.join(f"{key}={value}" for key, value in sorted((workspace_sync.get('counts_by_state') or {}).items())) or 'none')}</li>
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Slice</th>
+                  <th>State</th>
+                  <th>Existing</th>
+                  <th>Missing</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workspace_sync_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Patch Validation Gate</h2>
+          <ul>
+            <li>Entries: {patch_validation.get('entry_count', 0)}</li>
+            <li>Statuses: {escape(', '.join(f"{key}={value}" for key, value in sorted((patch_validation.get('counts_by_status') or {}).items())) or 'none')}</li>
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>Slice</th>
+                  <th>Status</th>
+                  <th>Issues</th>
+                </tr>
+              </thead>
+              <tbody>
+                {patch_validation_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Repair Tasks</h2>
+          <ul>
+            <li>Entries: {repair_tasks.get('entry_count', 0)}</li>
+            <li>Use one repair task at a time after validation or patch-gate failure.</li>
+          </ul>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Repair ID</th>
+                  <th>Source</th>
+                  <th>Title</th>
+                  <th>Next Command</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repair_rows}
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="panel">
+          <h2>Controlled Delivery</h2>
+          <ul>{controlled_delivery_markup}</ul>
+          <ul>
+            <li>Use <code>run-controlled-delivery</code> when you want the full bounded handoff pipeline.</li>
+          </ul>
+        </article>
+      </section>
+
       <section class="panel stack">
         <div>
           <h2>Module Complexity</h2>
@@ -956,6 +1160,27 @@ def build_web_report_html(output: AnalysisOutput) -> str:
           <h2>Target Integration Assistant</h2>
           <ul>{target_assistant_markup}</ul>
         </article>
+      </section>
+
+      <section class="panel stack">
+        <div>
+          <h2>Developer Handoff Packs</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Module</th>
+                  <th>First Slice</th>
+                  <th>Readiness</th>
+                  <th>Implementation Brief</th>
+                </tr>
+              </thead>
+              <tbody>
+                {handoff_rows}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <section class="panel stack">

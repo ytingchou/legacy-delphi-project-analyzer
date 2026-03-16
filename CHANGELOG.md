@@ -1,5 +1,17 @@
 # Changelog
 
+## v6.0.0
+
+- Added transition workspace sync reports so bounded React and Spring Boot patch slices can be compared against an existing transition repo before sending them to weak Cline/qwen3 sessions.
+- Added patch validation gates with source-artifact checks, merge-aware target validation, and explicit pass/warn/fail status summaries for patch packs.
+- Added interactive repair-task generation from runtime validation errors and patch-validation failures so weak-model retries can stay bounded and actionable.
+- Added a management-facing progress layer with persisted snapshot history, readiness trends, accepted-validation counts, and blocker trend notes.
+- Added developer handoff packs with implementation briefs, patch checklists, known-gap summaries, and per-module manifests.
+- Added multi-repo transition maps that summarize shared roots and reusable SQL query families across scan roots and external Delphi workspaces.
+- Added a controlled delivery pipeline that chains patch packs, workspace sync, validation, repair tasks, handoff packs, failure replay, and final delivery slices.
+- Expanded the HTML workbench/report with progress, workspace sync, patch validation, repair tasks, controlled delivery, developer handoff, and multi-repo transition visibility.
+- Added regression coverage for the new v6 transition-delivery feature set.
+
 ## v4.5.0
 
 - Added `Task Studio` runtime artifacts, per-task quick commands, and report visibility so teams can work one bounded Cline task at a time.

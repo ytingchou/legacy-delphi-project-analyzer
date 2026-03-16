@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +67,7 @@ def ingest_feedback_entries(
             "notes": entry.get("notes"),
             "response": response,
             "learned_rules": merged_rules,
-            "recorded_at": datetime.now(UTC).isoformat(),
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
         }
         feedback_log.append(normalized_entry)
 

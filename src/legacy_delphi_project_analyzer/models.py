@@ -570,6 +570,13 @@ class AnalysisOutput:
     target_integration_assistant: dict[str, Any] | None = None
     failure_replay_lab: dict[str, Any] | None = None
     golden_task_evaluation: dict[str, Any] | None = None
+    workspace_sync_report: dict[str, Any] | None = None
+    patch_validation_report: dict[str, Any] | None = None
+    repair_task_manifest: dict[str, Any] | None = None
+    progress_report: dict[str, Any] | None = None
+    developer_handoff_manifest: dict[str, Any] | None = None
+    multi_repo_transition_map: dict[str, Any] | None = None
+    controlled_delivery_manifest: dict[str, Any] | None = None
     runtime_error_summary: dict[str, Any] | None = None
     provider_health: dict[str, Any] | None = None
     review_summary: dict[str, Any] | None = None
